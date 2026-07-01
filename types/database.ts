@@ -15,6 +15,9 @@ export type Database = {
           watering_frequency: 'daily' | 'weekly' | 'monthly' | null;
           sunlight: 'low' | 'medium' | 'bright' | null;
           notes: string | null;
+          soil_type: string | null;
+          temperature_range: string | null;
+          care_tip: string | null;
         };
         Insert: {
           id?: string;
@@ -29,6 +32,9 @@ export type Database = {
           watering_frequency?: 'daily' | 'weekly' | 'monthly' | null;
           sunlight?: 'low' | 'medium' | 'bright' | null;
           notes?: string | null;
+          soil_type?: string | null;
+          temperature_range?: string | null;
+          care_tip?: string | null;
         };
         Update: {
           id?: string;
@@ -43,10 +49,93 @@ export type Database = {
           watering_frequency?: 'daily' | 'weekly' | 'monthly' | null;
           sunlight?: 'low' | 'medium' | 'bright' | null;
           notes?: string | null;
+          soil_type?: string | null;
+          temperature_range?: string | null;
+          care_tip?: string | null;
         };
+        Relationships: [];
+      };
+      care_tasks: {
+        Row: {
+          id: string;
+          plant_id: string;
+          user_id: string;
+          task_type: 'watering' | 'fertilizing' | 'misting';
+          due_date: string;
+          completed_at: string | null;
+          xp_reward: number;
+          interval_days: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          plant_id: string;
+          user_id: string;
+          task_type: 'watering' | 'fertilizing' | 'misting';
+          due_date: string;
+          completed_at?: string | null;
+          xp_reward?: number;
+          interval_days?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          plant_id?: string;
+          user_id?: string;
+          task_type?: 'watering' | 'fertilizing' | 'misting';
+          due_date?: string;
+          completed_at?: string | null;
+          xp_reward?: number;
+          interval_days?: number;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'care_tasks_plant_id_fkey';
+            columns: ['plant_id'];
+            referencedRelation: 'plants';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      profiles: {
+        Row: {
+          id: string;
+          total_xp: number;
+          created_at: string;
+        };
+        Insert: {
+          id: string;
+          total_xp?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          total_xp?: number;
+          created_at?: string;
+        };
+        Relationships: [];
       };
     };
+    Views: Record<string, never>;
+    Functions: {
+      increment_xp: {
+        Args: { xp_amount: number };
+        Returns: number;
+      };
+      complete_care_task: {
+        Args: { task_id: string };
+        Returns: unknown;
+      };
+    };
+    Enums: Record<string, never>;
+    CompositeTypes: Record<string, never>;
   };
 };
 
 export type Plant = Database['public']['Tables']['plants']['Row'];
+export type CareTask = Database['public']['Tables']['care_tasks']['Row'];
+
+export type CareTaskWithPlant = CareTask & {
+  plants: { id: string; name: string } | null;
+};

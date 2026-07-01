@@ -4,8 +4,19 @@ import { View, ActivityIndicator } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import type { Session } from '@supabase/supabase-js';
+import * as Notifications from 'expo-notifications';
 import { supabase } from '../lib/supabase';
 import { Colors } from '../constants/theme';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
 
 export default function RootLayout() {
   const [session, setSession] = useState<Session | null>(null);

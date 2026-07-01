@@ -12,38 +12,132 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
-import type { Plant } from '../../types/database';
+import { getLevel, xpToNextLevel } from '../../lib/levels';
+import { scheduleTaskNotification } from '../../lib/notifications';
+import type { Plant, CareTaskWithPlant } from '../../types/database';
 import { Colors, Spacing, Radius, FontSize } from '../../constants/theme';
 
-function XPBar({ value, max = 1000 }: { value: number; max?: number }) {
-  const pct = Math.min((value / max) * 100, 100);
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function todayISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+function getMood(health: number): { emoji: string; color: string } {
+  if (health >= 80) return { emoji: '😊', color: Colors.primary };
+  if (health >= 50) return { emoji: '😐', color: Colors.warning };
+  return { emoji: '🥺', color: Colors.danger };
+}
+
+const TASK_ICON: Record<string, string> = {
+  watering:    '💧',
+  fertilizing: '🌱',
+  misting:     '🌿',
+};
+const TASK_LABEL: Record<string, string> = {
+  watering:    'Water',
+  fertilizing: 'Fertilize',
+  misting:     'Mist',
+};
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function LevelBar({ totalXP }: { totalXP: number }) {
+  const level = getLevel(totalXP);
+  const { current, pct, needed } = xpToNextLevel(totalXP);
+  const isMax = needed === 0;
+
   return (
-    <View style={styles.xpBarBg}>
-      <View style={[styles.xpBarFill, { width: `${pct}%` }]} />
+    <View style={styles.levelBar}>
+      <View style={styles.levelBarRow}>
+        <Text style={styles.levelName}>{level.emoji} {level.name}</Text>
+        <Text style={styles.levelXP}>{totalXP.toLocaleString()} XP</Text>
+      </View>
+      <View style={styles.levelProgressBg}>
+        <View style={[styles.levelProgressFill, { width: `${pct}%` }]} />
+      </View>
+      <Text style={styles.levelNextText}>
+        {isMax ? 'Max level reached!' : `${needed} XP to next level`}
+      </Text>
     </View>
   );
 }
 
-function PlantCard({ name, species, level, xp, health_percent }: Plant) {
+function PlantCard({ plant, pendingTasks }: { plant: Plant; pendingTasks: CareTaskWithPlant[] }) {
+  const today = todayISO();
+  const overdueCount = pendingTasks.filter(t => t.plant_id === plant.id && t.due_date < today).length;
+  const displayHealth = Math.max(0, plant.health_percent - overdueCount * 10);
+  const { emoji, color } = getMood(displayHealth);
+
   return (
     <View style={styles.plantCard}>
-      <View style={styles.plantIconWrapper}>
-        <Ionicons name="leaf" size={28} color={Colors.primary} />
+      <View style={styles.plantMoodWrap}>
+        <Text style={styles.plantMood}>{emoji}</Text>
       </View>
       <View style={styles.plantInfo}>
         <View style={styles.plantRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.plantName}>{name}</Text>
-            {species ? <Text style={styles.plantSpecies}>{species}</Text> : null}
+            <Text style={styles.plantName}>{plant.name}</Text>
+            {plant.species ? <Text style={styles.plantSpecies}>{plant.species}</Text> : null}
           </View>
           <View style={styles.levelBadge}>
-            <Text style={styles.levelText}>Lv {level}</Text>
+            <Text style={styles.levelBadgeText}>Lv {plant.level}</Text>
           </View>
         </View>
-        <Text style={styles.healthLabel}>Health {health_percent}%</Text>
-        <XPBar value={xp} max={level * 200} />
-        <Text style={styles.xpText}>{xp} XP</Text>
+        <View style={styles.healthRow}>
+          <View style={styles.healthBarBg}>
+            <View style={[styles.healthBarFill, { width: `${displayHealth}%`, backgroundColor: color }]} />
+          </View>
+          <Text style={[styles.healthPct, { color }]}>{displayHealth}%</Text>
+        </View>
       </View>
+    </View>
+  );
+}
+
+function MissionCard({
+  task,
+  isCompleting,
+  onComplete,
+}: {
+  task: CareTaskWithPlant;
+  isCompleting: boolean;
+  onComplete: () => void;
+}) {
+  const today = todayISO();
+  const isOverdue = task.due_date < today;
+
+  return (
+    <View style={[styles.missionCard, isOverdue && styles.missionCardOverdue]}>
+      <Text style={styles.missionEmoji}>{TASK_ICON[task.task_type] ?? '🌿'}</Text>
+      <View style={styles.missionInfo}>
+        <Text style={styles.missionAction}>
+          {TASK_LABEL[task.task_type]} {task.plants?.name ?? 'plant'}
+        </Text>
+        {isOverdue && <Text style={styles.missionOverdue}>Overdue</Text>}
+      </View>
+      <View style={styles.missionXPBadge}>
+        <Text style={styles.missionXPText}>+{task.xp_reward} XP</Text>
+      </View>
+      <TouchableOpacity
+        style={[styles.doneBtn, isCompleting && styles.doneBtnBusy]}
+        onPress={onComplete}
+        disabled={isCompleting}
+      >
+        {isCompleting ? (
+          <ActivityIndicator size="small" color={Colors.textPrimary} />
+        ) : (
+          <Text style={styles.doneBtnText}>Done</Text>
+        )}
+      </TouchableOpacity>
     </View>
   );
 }
@@ -64,69 +158,99 @@ function EmptyGarden({ onAddFirst }: { onAddFirst: () => void }) {
   );
 }
 
+// ─── Screen ───────────────────────────────────────────────────────────────────
+
 export default function GardenScreen() {
   const router = useRouter();
-  const [plants, setPlants] = useState<Plant[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [plants, setPlants]             = useState<Plant[]>([]);
+  const [pendingTasks, setPendingTasks] = useState<CareTaskWithPlant[]>([]);
+  const [totalXP, setTotalXP]           = useState(0);
+  const [loading, setLoading]           = useState(true);
+  const [refreshing, setRefreshing]     = useState(false);
+  const [error, setError]               = useState<string | null>(null);
+  const [completingTask, setCompletingTask] = useState<string | null>(null);
   const hasLoaded = useRef(false);
 
-  const totalXP = plants.reduce((sum, p) => sum + p.xp, 0);
-
-  const fetchPlants = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     setError(null);
-    const { data, error: fetchError } = await supabase
-      .from('plants')
-      .select('*')
-      .order('created_at', { ascending: true });
+    const today = todayISO();
 
-    if (fetchError) {
-      setError(fetchError.message);
+    const [plantsRes, tasksRes, profileRes] = await Promise.all([
+      supabase.from('plants').select('*').order('created_at', { ascending: true }),
+      supabase
+        .from('care_tasks')
+        .select('*, plants(id, name)')
+        .lte('due_date', today)
+        .is('completed_at', null)
+        .order('due_date'),
+      supabase.from('profiles').select('total_xp').maybeSingle(),
+    ]);
+
+    if (plantsRes.error) {
+      setError(plantsRes.error.message);
     } else {
-      setPlants(data ?? []);
+      setPlants(plantsRes.data ?? []);
     }
+    setPendingTasks((tasksRes.data ?? []) as CareTaskWithPlant[]);
+    setTotalXP(profileRes.data?.total_xp ?? 0);
   }, []);
 
-  // Show loading spinner only on the first load; silently refresh on re-focus
   useFocusEffect(
     useCallback(() => {
-      if (!hasLoaded.current) {
-        setLoading(true);
-      }
-      fetchPlants().finally(() => {
+      if (!hasLoaded.current) setLoading(true);
+      fetchData().finally(() => {
         setLoading(false);
         hasLoaded.current = true;
       });
-    }, [fetchPlants]),
+    }, [fetchData]),
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchPlants();
+    await fetchData();
     setRefreshing(false);
-  }, [fetchPlants]);
+  }, [fetchData]);
+
+  const handleCompleteTask = useCallback(async (task: CareTaskWithPlant) => {
+    setCompletingTask(task.id);
+    try {
+      const { data, error: rpcErr } = await supabase.rpc('complete_care_task', { task_id: task.id });
+      if (rpcErr) throw rpcErr;
+
+      const result = data as { next_due_date: string; task_type: string } | null;
+      if (result?.next_due_date && task.plants?.name) {
+        scheduleTaskNotification(task.plants.name, result.task_type, result.next_due_date).catch(() => {});
+      }
+
+      await fetchData();
+    } catch {
+      // silently ignore — list refreshes on next focus
+    } finally {
+      setCompletingTask(null);
+    }
+  }, [fetchData]);
 
   const openAddPlant = useCallback(() => router.push('/add-plant'), [router]);
-  const handleAddFirst = openAddPlant;
+
+  const visibleMissions = pendingTasks.slice(0, 3);
+  const extraMissions = pendingTasks.length - visibleMissions.length;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[styles.content, !loading && plants.length === 0 && styles.contentCentered]}
+        contentContainerStyle={[
+          styles.content,
+          !loading && plants.length === 0 && styles.contentCentered,
+        ]}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={Colors.primary}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
         }
       >
         {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Good morning 🌱</Text>
+            <Text style={styles.greeting}>{greeting()} 🌱</Text>
             <Text style={styles.title}>My Garden</Text>
           </View>
           <TouchableOpacity style={styles.addBtn} onPress={openAddPlant}>
@@ -134,26 +258,10 @@ export default function GardenScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Stats row */}
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <Ionicons name="trophy" size={20} color={Colors.xp} />
-            <Text style={styles.statValue}>{totalXP.toLocaleString()}</Text>
-            <Text style={styles.statLabel}>Total XP</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Ionicons name="leaf" size={20} color={Colors.primary} />
-            <Text style={styles.statValue}>{plants.length}</Text>
-            <Text style={styles.statLabel}>Plants</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Ionicons name="flame" size={20} color={Colors.warning} />
-            <Text style={styles.statValue}>—</Text>
-            <Text style={styles.statLabel}>Day Streak</Text>
-          </View>
-        </View>
+        {/* Level bar */}
+        <LevelBar totalXP={totalXP} />
 
-        {/* Plant list / states */}
+        {/* Content */}
         {loading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={Colors.primary} />
@@ -162,17 +270,40 @@ export default function GardenScreen() {
           <View style={styles.errorContainer}>
             <Ionicons name="warning-outline" size={32} color={Colors.danger} />
             <Text style={styles.errorText}>{error}</Text>
-            <TouchableOpacity style={styles.retryBtn} onPress={fetchPlants}>
+            <TouchableOpacity style={styles.retryBtn} onPress={fetchData}>
               <Text style={styles.retryText}>Retry</Text>
             </TouchableOpacity>
           </View>
         ) : plants.length === 0 ? (
-          <EmptyGarden onAddFirst={handleAddFirst} />
+          <EmptyGarden onAddFirst={openAddPlant} />
         ) : (
           <>
-            <Text style={styles.sectionTitle}>Your Plants</Text>
-            {plants.map((p) => (
-              <PlantCard key={p.id} {...p} />
+            {/* Today's Missions */}
+            <Text style={styles.sectionTitle}>Today's Missions</Text>
+            {visibleMissions.length === 0 ? (
+              <View style={styles.noMissions}>
+                <Text style={styles.noMissionsText}>All plants are happy today!</Text>
+              </View>
+            ) : (
+              <>
+                {visibleMissions.map(task => (
+                  <MissionCard
+                    key={task.id}
+                    task={task}
+                    isCompleting={completingTask === task.id}
+                    onComplete={() => handleCompleteTask(task)}
+                  />
+                ))}
+                {extraMissions > 0 && (
+                  <Text style={styles.extraMissions}>+{extraMissions} more task{extraMissions > 1 ? 's' : ''}</Text>
+                )}
+              </>
+            )}
+
+            {/* Plants */}
+            <Text style={[styles.sectionTitle, { marginTop: Spacing.lg }]}>Your Plants</Text>
+            {plants.map(p => (
+              <PlantCard key={p.id} plant={p} pendingTasks={pendingTasks} />
             ))}
           </>
         )}
@@ -181,17 +312,20 @@ export default function GardenScreen() {
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.background },
   scroll: { flex: 1 },
   content: { padding: Spacing.md, paddingBottom: Spacing.xxl },
   contentCentered: { flexGrow: 1 },
 
+  // Header
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.md,
   },
   greeting: { fontSize: FontSize.sm, color: Colors.textSecondary, marginBottom: 2 },
   title: { fontSize: FontSize.hero, fontWeight: '700', color: Colors.textPrimary },
@@ -204,29 +338,95 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
-  statsRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.lg },
-  statCard: {
-    flex: 1,
+  // Level bar
+  levelBar: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    marginBottom: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: 6,
+  },
+  levelBarRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  levelName: { fontSize: FontSize.md, fontWeight: '700', color: Colors.textPrimary },
+  levelXP: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.xp },
+  levelProgressBg: {
+    height: 8,
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: Radius.full,
+    overflow: 'hidden',
+  },
+  levelProgressFill: {
+    height: '100%',
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.full,
+  },
+  levelNextText: { fontSize: FontSize.xs, color: Colors.textMuted },
+
+  // Sections
+  sectionTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: Spacing.sm,
+  },
+
+  // Missions
+  noMissions: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.md,
-    padding: Spacing.sm,
+    padding: Spacing.md,
     alignItems: 'center',
-    gap: 4,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: Spacing.sm,
+  },
+  noMissionsText: { fontSize: FontSize.sm, color: Colors.textSecondary },
+  missionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.card,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    marginBottom: Spacing.sm,
+    gap: Spacing.sm,
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  statValue: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.textPrimary },
-  statLabel: { fontSize: FontSize.xs, color: Colors.textMuted },
-
-  sectionTitle: {
-    fontSize: FontSize.lg,
-    fontWeight: '600',
-    color: Colors.textSecondary,
+  missionCardOverdue: { borderColor: Colors.danger },
+  missionEmoji: { fontSize: 22, width: 30, textAlign: 'center' },
+  missionInfo: { flex: 1, gap: 2 },
+  missionAction: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.textPrimary },
+  missionOverdue: { fontSize: FontSize.xs, color: Colors.danger, fontWeight: '600' },
+  missionXPBadge: {
+    backgroundColor: 'rgba(244,208,63,0.15)',
+    borderRadius: Radius.full,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  missionXPText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.xp },
+  doneBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    minWidth: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  doneBtnBusy: { opacity: 0.6 },
+  doneBtnText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.textPrimary },
+  extraMissions: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textAlign: 'center',
     marginBottom: Spacing.sm,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
   },
 
+  // Plant cards
   plantCard: {
     flexDirection: 'row',
     backgroundColor: Colors.card,
@@ -237,7 +437,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  plantIconWrapper: {
+  plantMoodWrap: {
     width: 52,
     height: 52,
     borderRadius: Radius.md,
@@ -245,7 +445,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  plantInfo: { flex: 1, gap: 4 },
+  plantMood: { fontSize: 26 },
+  plantInfo: { flex: 1, gap: 6 },
   plantRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   plantName: { fontSize: FontSize.md, fontWeight: '600', color: Colors.textPrimary },
   plantSpecies: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: 1 },
@@ -255,26 +456,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
   },
-  levelText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.textPrimary },
-  healthLabel: { fontSize: FontSize.xs, color: Colors.textMuted },
-  xpBarBg: {
-    height: 4,
+  levelBadgeText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.textPrimary },
+  healthRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  healthBarBg: {
+    flex: 1,
+    height: 5,
     backgroundColor: Colors.surfaceElevated,
     borderRadius: Radius.full,
     overflow: 'hidden',
-    marginTop: 2,
   },
-  xpBarFill: { height: '100%', backgroundColor: Colors.primary, borderRadius: Radius.full },
-  xpText: { fontSize: FontSize.xs, color: Colors.textMuted },
+  healthBarFill: { height: '100%', borderRadius: Radius.full },
+  healthPct: { fontSize: FontSize.xs, fontWeight: '700', minWidth: 32, textAlign: 'right' },
 
+  // States
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
-
-  errorContainer: {
-    flex: 1,
-    alignItems: 'center',
-    paddingTop: 80,
-    gap: Spacing.sm,
-  },
+  errorContainer: { flex: 1, alignItems: 'center', paddingTop: 80, gap: Spacing.sm },
   errorText: { fontSize: FontSize.sm, color: Colors.danger, textAlign: 'center' },
   retryBtn: {
     marginTop: Spacing.sm,
@@ -284,7 +480,6 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
   },
   retryText: { fontSize: FontSize.sm, color: Colors.textPrimary, fontWeight: '600' },
-
   emptyContainer: {
     flex: 1,
     alignItems: 'center',

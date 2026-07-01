@@ -79,12 +79,110 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.increment_xp(INTEGER) TO authenticated;
 
--- ─── Plants table: new care columns ─────────────────────────────────────────
--- Run only on an existing DB (safe to re-run; IF NOT EXISTS guards each column)
+-- ─── Plants table: care + AI detection columns (safe to re-run) ─────────────
 
 ALTER TABLE public.plants
   ADD COLUMN IF NOT EXISTS watering_frequency TEXT
     CHECK (watering_frequency IN ('daily', 'weekly', 'monthly')),
   ADD COLUMN IF NOT EXISTS sunlight TEXT
     CHECK (sunlight IN ('low', 'medium', 'bright')),
-  ADD COLUMN IF NOT EXISTS notes TEXT;
+  ADD COLUMN IF NOT EXISTS notes TEXT,
+  ADD COLUMN IF NOT EXISTS soil_type TEXT,
+  ADD COLUMN IF NOT EXISTS temperature_range TEXT,
+  ADD COLUMN IF NOT EXISTS care_tip TEXT;
+
+-- ─── Care tasks ───────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS public.care_tasks (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  plant_id      UUID        NOT NULL REFERENCES public.plants(id) ON DELETE CASCADE,
+  user_id       UUID        NOT NULL REFERENCES auth.users(id)  ON DELETE CASCADE,
+  task_type     TEXT        NOT NULL CHECK (task_type IN ('watering', 'fertilizing', 'misting')),
+  due_date      DATE        NOT NULL,
+  completed_at  TIMESTAMPTZ,
+  xp_reward     INTEGER     NOT NULL DEFAULT 10,
+  interval_days INTEGER     NOT NULL DEFAULT 7,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS care_tasks_user_date_idx  ON public.care_tasks (user_id, due_date);
+CREATE INDEX IF NOT EXISTS care_tasks_plant_id_idx   ON public.care_tasks (plant_id);
+
+ALTER TABLE public.care_tasks ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own tasks"
+  ON public.care_tasks FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own tasks"
+  ON public.care_tasks FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own tasks"
+  ON public.care_tasks FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own tasks"
+  ON public.care_tasks FOR DELETE USING (auth.uid() = user_id);
+
+-- Completes a task, boosts plant health, creates next recurring task, awards XP.
+-- Returns JSON: { new_xp, new_health, next_task_id, next_due_date, task_type, xp_reward }
+CREATE OR REPLACE FUNCTION public.complete_care_task(task_id UUID)
+RETURNS JSON
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_task         care_tasks;
+  v_plant_health INTEGER;
+  v_new_xp       INTEGER;
+  v_new_health   INTEGER;
+  v_next_id      UUID;
+  v_next_due     DATE;
+  v_health_boost INTEGER;
+BEGIN
+  SELECT ct.* INTO v_task
+  FROM   care_tasks ct
+  WHERE  ct.id = task_id
+    AND  ct.user_id = auth.uid()
+    AND  ct.completed_at IS NULL
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Task not found, already completed, or unauthorized';
+  END IF;
+
+  UPDATE care_tasks SET completed_at = NOW() WHERE id = task_id;
+
+  SELECT health_percent INTO v_plant_health FROM plants WHERE id = v_task.plant_id;
+
+  v_health_boost := CASE v_task.task_type
+    WHEN 'watering'    THEN 8
+    WHEN 'fertilizing' THEN 15
+    WHEN 'misting'     THEN 3
+    ELSE 5
+  END;
+
+  v_new_health := LEAST(v_plant_health + v_health_boost, 100);
+  UPDATE plants SET health_percent = v_new_health WHERE id = v_task.plant_id;
+
+  v_next_due := CURRENT_DATE + v_task.interval_days;
+  INSERT INTO care_tasks (plant_id, user_id, task_type, due_date, xp_reward, interval_days)
+  VALUES (v_task.plant_id, auth.uid(), v_task.task_type, v_next_due, v_task.xp_reward, v_task.interval_days)
+  RETURNING id INTO v_next_id;
+
+  INSERT INTO profiles (id, total_xp)
+  VALUES (auth.uid(), v_task.xp_reward)
+  ON CONFLICT (id) DO UPDATE SET total_xp = profiles.total_xp + v_task.xp_reward
+  RETURNING total_xp INTO v_new_xp;
+
+  RETURN json_build_object(
+    'new_xp',       v_new_xp,
+    'new_health',   v_new_health,
+    'next_task_id', v_next_id,
+    'next_due_date', v_next_due::TEXT,
+    'task_type',    v_task.task_type,
+    'xp_reward',    v_task.xp_reward
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.complete_care_task(UUID) TO authenticated;

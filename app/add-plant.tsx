@@ -1,475 +1,359 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import {
   View,
   Text,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
+  ScrollView,
+  TouchableOpacity,
   ActivityIndicator,
+  Alert,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
+import { requestNotificationPermission, scheduleTaskNotification } from '../lib/notifications';
 import { Colors, Spacing, Radius, FontSize } from '../constants/theme';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+type Phase = 'capture' | 'analyzing' | 'review';
 
-type WateringFreq = 'daily' | 'weekly' | 'monthly';
-type SunlightLevel = 'low' | 'medium' | 'bright';
-
-const WATERING_OPTIONS: { value: WateringFreq; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { value: 'daily',   label: 'Daily',   icon: 'water-outline'    },
-  { value: 'weekly',  label: 'Weekly',  icon: 'calendar-outline' },
-  { value: 'monthly', label: 'Monthly', icon: 'moon-outline'     },
-];
-
-const SUNLIGHT_OPTIONS: { value: SunlightLevel; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { value: 'low',    label: 'Low Light', icon: 'cloud-outline'        },
-  { value: 'medium', label: 'Medium',    icon: 'partly-sunny-outline' },
-  { value: 'bright', label: 'Bright',    icon: 'sunny-outline'        },
-];
-
-// ─── Pill picker ──────────────────────────────────────────────────────────────
-
-function PillPicker<T extends string>({
-  options,
-  value,
-  onChange,
-  disabled,
-}: {
-  options: { value: T; label: string; icon: keyof typeof Ionicons.glyphMap }[];
-  value: T;
-  onChange: (v: T) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <View style={pill.row}>
-      {options.map((opt) => {
-        const active = opt.value === value;
-        return (
-          <TouchableOpacity
-            key={opt.value}
-            style={[pill.btn, active && pill.btnActive]}
-            onPress={() => onChange(opt.value)}
-            activeOpacity={0.75}
-            disabled={disabled}
-          >
-            <Ionicons
-              name={opt.icon}
-              size={13}
-              color={active ? Colors.background : Colors.textMuted}
-            />
-            <Text style={[pill.label, active && pill.labelActive]}>{opt.label}</Text>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
+interface DetectedPlant {
+  name: string;
+  species: string;
+  wateringFrequency: 'daily' | 'weekly' | 'monthly';
+  wateringDays: number;
+  sunlight: 'low' | 'medium' | 'bright';
+  soilType: string;
+  temperature: string;
+  careTip: string;
+  fertilizingDays: number;
+  mistingDays: number | null;
 }
 
-const pill = StyleSheet.create({
-  row: { flexDirection: 'row', gap: Spacing.xs },
-  btn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    paddingVertical: 10,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  btnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  label: { fontSize: FontSize.xs, fontWeight: '500', color: Colors.textMuted },
-  labelActive: { color: Colors.background, fontWeight: '700' },
-});
+const SUNLIGHT_LABELS: Record<string, string> = {
+  low: 'Low Light',
+  medium: 'Indirect Light',
+  bright: 'Bright Direct',
+};
 
-// ─── Screen ───────────────────────────────────────────────────────────────────
+function addDaysToToday(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 export default function AddPlantScreen() {
   const router = useRouter();
+  const [phase, setPhase] = useState<Phase>('capture');
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [detected, setDetected] = useState<DetectedPlant | null>(null);
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const [name, setName]       = useState('');
-  const [species, setSpecies] = useState('');
-  const [watering, setWatering] = useState<WateringFreq>('weekly');
-  const [sunlight, setSunlight] = useState<SunlightLevel>('medium');
-  const [notes, setNotes]     = useState('');
-
-  const [identifying, setIdentifying] = useState(false);
-  const [saving, setSaving]           = useState(false);
-  const [identifyErr, setIdentifyErr] = useState<string | null>(null);
-  const [saveErr, setSaveErr]         = useState<string | null>(null);
-
-  const speciesRef = useRef<TextInput>(null);
-  const notesRef   = useRef<TextInput>(null);
-
-  const busy       = saving || identifying;
-  const canSave    = name.trim().length > 0 && !busy;
-  const canIdentify = (species.trim().length > 0 || name.trim().length > 0) && !busy;
-
-  // ── AI identify ─────────────────────────────────────────────────────────────
-  const handleIdentify = useCallback(async () => {
-    const query = species.trim() || name.trim();
-    if (!query) return;
-
-    setIdentifying(true);
-    setIdentifyErr(null);
-
+  const runAnalysis = useCallback(async (uri: string, base64: string, mediaType: string) => {
+    setPhotoUri(uri);
+    setPhase('analyzing');
+    setAnalyzeError(null);
     try {
-      const { data, error } = await supabase.functions.invoke('identify-plant', {
-        body: { query },
+      const { data, error } = await supabase.functions.invoke('detect-plant', {
+        body: { image: base64, mediaType },
       });
-
-      if (error) throw new Error(error.message ?? 'Identify failed');
-      if (!data || data.error) throw new Error(data?.error ?? 'Could not identify plant');
-
-      if (typeof data.name === 'string' && data.name) setName(data.name);
-      if (typeof data.species === 'string' && data.species) setSpecies(data.species);
-    } catch (err) {
-      setIdentifyErr(
-        err instanceof Error ? err.message : 'Identification failed. Please try again.',
-      );
-    } finally {
-      setIdentifying(false);
-    }
-  }, [species, name]);
-
-  // ── Save ─────────────────────────────────────────────────────────────────────
-  const handleSave = useCallback(async () => {
-    if (!name.trim()) return;
-    setSaving(true);
-    setSaveErr(null);
-
-    try {
-      const { data: userData, error: userErr } = await supabase.auth.getUser();
-      if (userErr || !userData.user) throw new Error('Not authenticated');
-
-      const { error } = await supabase.from('plants').insert({
-        user_id: userData.user.id,
-        name: name.trim(),
-        species: species.trim() || null,
-        watering_frequency: watering,
-        sunlight,
-        notes: notes.trim() || null,
-        level: 1,
-        xp: 0,
-        health_percent: 100,
-        last_watered: null,
-      });
-
       if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      setDetected(data as DetectedPlant);
+      setPhase('review');
+    } catch (err) {
+      setAnalyzeError(err instanceof Error ? err.message : 'Detection failed. Please try again.');
+      setPhase('capture');
+    }
+  }, []);
 
-      // Award 50 XP — fire-and-forget, never blocks navigation
-      supabase.rpc('increment_xp', { xp_amount: 50 }).catch(() => {});
+  const handleTakePhoto = useCallback(async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Camera access is required to take a plant photo.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.5 });
+    if (result.canceled || !result.assets?.[0]?.base64) return;
+    const asset = result.assets[0];
+    await runAnalysis(asset.uri, asset.base64!, 'image/jpeg');
+  }, [runAnalysis]);
 
+  const handlePickImage = useCallback(async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Photo library access is required.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      base64: true,
+      quality: 0.5,
+    });
+    if (result.canceled || !result.assets?.[0]?.base64) return;
+    const asset = result.assets[0];
+    const mt = ['image/jpeg', 'image/png', 'image/webp'].includes(asset.mimeType ?? '')
+      ? asset.mimeType!
+      : 'image/jpeg';
+    await runAnalysis(asset.uri, asset.base64!, mt);
+  }, [runAnalysis]);
+
+  const handleSave = useCallback(async () => {
+    if (!detected) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const wDays = Math.max(1, Math.round(detected.wateringDays || 7));
+      const fDays = Math.max(1, Math.round(detected.fertilizingDays || 14));
+      const mDays = detected.mistingDays != null ? Math.max(1, Math.round(detected.mistingDays)) : null;
+
+      const { data: plant, error: plantErr } = await supabase
+        .from('plants')
+        .insert({
+          user_id: user.id,
+          name: detected.name,
+          species: detected.species,
+          watering_frequency: detected.wateringFrequency,
+          sunlight: detected.sunlight,
+          soil_type: detected.soilType,
+          temperature_range: detected.temperature,
+          care_tip: detected.careTip,
+          health_percent: 100,
+        })
+        .select('id')
+        .single();
+
+      if (plantErr || !plant) throw new Error(plantErr?.message ?? 'Failed to save plant');
+
+      const taskInserts = [
+        { plant_id: plant.id, user_id: user.id, task_type: 'watering' as const,    due_date: addDaysToToday(wDays), xp_reward: 10, interval_days: wDays },
+        { plant_id: plant.id, user_id: user.id, task_type: 'fertilizing' as const, due_date: addDaysToToday(fDays), xp_reward: 25, interval_days: fDays },
+        ...(mDays != null
+          ? [{ plant_id: plant.id, user_id: user.id, task_type: 'misting' as const, due_date: addDaysToToday(mDays), xp_reward: 5, interval_days: mDays }]
+          : []),
+      ];
+
+      await supabase.from('care_tasks').insert(taskInserts);
+
+      const hasPermission = await requestNotificationPermission();
+      if (hasPermission) {
+        for (const t of taskInserts) {
+          scheduleTaskNotification(detected.name, t.task_type, t.due_date).catch(() => {});
+        }
+      }
+
+      supabase.rpc('increment_xp', { xp_amount: 50 }).then(null, () => {});
       router.back();
     } catch (err) {
-      setSaveErr(
-        err instanceof Error ? err.message : 'Failed to save plant. Please try again.',
-      );
+      setSaveError(err instanceof Error ? err.message : 'Failed to save plant');
     } finally {
       setSaving(false);
     }
-  }, [name, species, watering, sunlight, notes, router]);
+  }, [detected, router]);
 
-  return (
-    <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        {/* ── Header ── */}
-        <View style={s.header}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={s.closeBtn}
-            disabled={busy}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Ionicons name="close" size={20} color={Colors.textSecondary} />
-          </TouchableOpacity>
-          <Text style={s.headerTitle}>Add Plant</Text>
-          <TouchableOpacity
-            style={[s.headerSaveBtn, !canSave && s.headerSaveBtnDisabled]}
-            onPress={handleSave}
-            disabled={!canSave}
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color={Colors.background} />
-            ) : (
-              <Text style={s.headerSaveBtnText}>Save</Text>
-            )}
-          </TouchableOpacity>
+  // ── Analyzing ────────────────────────────────────────────────────────────────
+  if (phase === 'analyzing') {
+    return (
+      <View style={styles.root}>
+        {photoUri && (
+          <Image source={{ uri: photoUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        )}
+        <View style={styles.analyzingOverlay}>
+          <View style={styles.analyzingSpinnerWrap}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+          </View>
+          <Text style={styles.analyzingTitle}>Reading your plant...</Text>
+          <Text style={styles.analyzingSubtitle}>AI is detecting species & care needs</Text>
         </View>
+      </View>
+    );
+  }
 
-        <ScrollView
-          contentContainerStyle={s.content}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {/* ── Plant name ── */}
-          <View style={s.group}>
-            <Text style={s.label}>
-              Plant Name <Text style={s.required}>*</Text>
-            </Text>
-            <View style={s.inputRow}>
-              <Ionicons name="leaf-outline" size={17} color={Colors.textMuted} />
-              <TextInput
-                style={s.input}
-                value={name}
-                onChangeText={setName}
-                placeholder="e.g. My Monstera"
-                placeholderTextColor={Colors.textMuted}
-                autoCapitalize="words"
-                returnKeyType="next"
-                editable={!busy}
-                onSubmitEditing={() => speciesRef.current?.focus()}
-              />
-            </View>
-          </View>
+  // ── Review ───────────────────────────────────────────────────────────────────
+  if (phase === 'review' && detected) {
+    const wDays = Math.max(1, Math.round(detected.wateringDays || 7));
+    const infoItems = [
+      { icon: 'water-outline',       label: 'Watering',    value: `Every ${wDays} day${wDays === 1 ? '' : 's'}` },
+      { icon: 'sunny-outline',       label: 'Sunlight',    value: SUNLIGHT_LABELS[detected.sunlight] ?? detected.sunlight },
+      { icon: 'earth-outline',       label: 'Soil',        value: detected.soilType },
+      { icon: 'thermometer-outline', label: 'Temperature', value: detected.temperature },
+    ] as const;
 
-          {/* ── Species + Identify ── */}
-          <View style={s.group}>
-            <Text style={s.label}>Species</Text>
-            <View style={s.speciesRow}>
-              <View style={[s.inputRow, { flex: 1 }]}>
-                <Ionicons name="search-outline" size={17} color={Colors.textMuted} />
-                <TextInput
-                  ref={speciesRef}
-                  style={s.input}
-                  value={species}
-                  onChangeText={(v) => { setSpecies(v); setIdentifyErr(null); }}
-                  placeholder="e.g. spiky green thing"
-                  placeholderTextColor={Colors.textMuted}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  returnKeyType="next"
-                  editable={!busy}
-                  onSubmitEditing={() => notesRef.current?.focus()}
-                />
-              </View>
-              <TouchableOpacity
-                style={[s.identifyBtn, !canIdentify && s.identifyBtnDisabled]}
-                onPress={handleIdentify}
-                disabled={!canIdentify}
-                activeOpacity={0.82}
-              >
-                {identifying ? (
-                  <ActivityIndicator size="small" color={Colors.background} />
-                ) : (
-                  <>
-                    <Ionicons
-                      name="color-wand-outline"
-                      size={13}
-                      color={canIdentify ? Colors.background : Colors.textMuted}
-                    />
-                    <Text style={[s.identifyBtnText, !canIdentify && s.identifyBtnTextOff]}>
-                      Identify
-                    </Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
+    return (
+      <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
+        <ScrollView contentContainerStyle={styles.reviewScroll} showsVerticalScrollIndicator={false}>
+          {photoUri && (
+            <Image source={{ uri: photoUri }} style={styles.reviewImage} resizeMode="cover" />
+          )}
 
-            {identifyErr ? (
-              <View style={s.inlineErr}>
-                <Ionicons name="alert-circle-outline" size={13} color={Colors.danger} />
-                <Text style={s.inlineErrText}>{identifyErr}</Text>
-              </View>
-            ) : (
-              <Text style={s.helper}>Not sure? Type anything and tap Identify</Text>
-            )}
-          </View>
+          <View style={styles.reviewCard}>
+            <Text style={styles.reviewName}>{detected.name}</Text>
+            <Text style={styles.reviewSpecies}>{detected.species}</Text>
 
-          {/* ── Watering frequency ── */}
-          <View style={s.group}>
-            <Text style={s.label}>Watering Frequency</Text>
-            <PillPicker
-              options={WATERING_OPTIONS}
-              value={watering}
-              onChange={setWatering}
-              disabled={busy}
-            />
-          </View>
-
-          {/* ── Sunlight ── */}
-          <View style={s.group}>
-            <Text style={s.label}>Sunlight Needs</Text>
-            <PillPicker
-              options={SUNLIGHT_OPTIONS}
-              value={sunlight}
-              onChange={setSunlight}
-              disabled={busy}
-            />
-          </View>
-
-          {/* ── Notes ── */}
-          <View style={s.group}>
-            <Text style={s.label}>
-              Notes <Text style={s.optional}>(optional)</Text>
-            </Text>
-            <View style={[s.inputRow, s.notesWrap]}>
-              <TextInput
-                ref={notesRef}
-                style={[s.input, s.notesInput]}
-                value={notes}
-                onChangeText={setNotes}
-                placeholder="Location, quirks, reminders…"
-                placeholderTextColor={Colors.textMuted}
-                multiline
-                numberOfLines={3}
-                textAlignVertical="top"
-                editable={!busy}
-              />
-            </View>
-          </View>
-
-          {/* ── Save error ── */}
-          {saveErr ? (
-            <View style={s.saveErr}>
-              <Ionicons name="alert-circle-outline" size={15} color={Colors.danger} />
-              <Text style={s.saveErrText}>{saveErr}</Text>
-            </View>
-          ) : null}
-
-          {/* ── Primary save button ── */}
-          <TouchableOpacity
-            style={[s.saveBtn, !canSave && s.saveBtnDisabled]}
-            onPress={handleSave}
-            disabled={!canSave}
-            activeOpacity={0.85}
-          >
-            {saving ? (
-              <ActivityIndicator color={Colors.textPrimary} />
-            ) : (
-              <>
-                <Ionicons name="add-circle-outline" size={19} color={Colors.textPrimary} />
-                <Text style={s.saveBtnText}>Save Plant</Text>
-                <View style={s.xpPill}>
-                  <Ionicons name="star" size={11} color={Colors.background} />
-                  <Text style={s.xpPillText}>+50 XP</Text>
+            <View style={styles.infoGrid}>
+              {infoItems.map(({ icon, label, value }) => (
+                <View key={label} style={styles.infoItem}>
+                  <Ionicons name={icon as any} size={20} color={Colors.primary} />
+                  <Text style={styles.infoLabel}>{label}</Text>
+                  <Text style={styles.infoValue} numberOfLines={2}>{value}</Text>
                 </View>
-              </>
-            )}
-          </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.careTipBox}>
+              <Text style={styles.careTipLabel}>Care Tip</Text>
+              <Text style={styles.careTipText}>{detected.careTip}</Text>
+            </View>
+
+            {saveError ? <Text style={styles.errorText}>{saveError}</Text> : null}
+
+            <TouchableOpacity
+              style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+              onPress={handleSave}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color={Colors.textPrimary} />
+              ) : (
+                <>
+                  <Ionicons name="checkmark-circle" size={20} color={Colors.textPrimary} />
+                  <Text style={styles.saveBtnText}>Save to Garden  +50 XP</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.retakeBtn} onPress={() => setPhase('capture')}>
+              <Text style={styles.retakeBtnText}>Retake Photo</Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
+  }
+
+  // ── Capture ──────────────────────────────────────────────────────────────────
+  return (
+    <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
+      <View style={styles.captureHeader}>
+        <TouchableOpacity style={styles.closeBtn} onPress={() => router.back()}>
+          <Ionicons name="close" size={22} color={Colors.textPrimary} />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.captureBody}>
+        <Ionicons name="leaf" size={64} color={Colors.primary} style={{ marginBottom: Spacing.lg }} />
+        <Text style={styles.captureTitle}>Add a Plant</Text>
+        <Text style={styles.captureSubtitle}>
+          Take a photo and our AI will identify the species and build a personalised care schedule automatically.
+        </Text>
+
+        {analyzeError ? (
+          <View style={styles.errorBox}>
+            <Ionicons name="warning-outline" size={18} color={Colors.danger} />
+            <Text style={styles.errorBoxText}>{analyzeError}</Text>
+          </View>
+        ) : null}
+
+        <TouchableOpacity style={styles.photoBtn} onPress={handleTakePhoto}>
+          <Ionicons name="camera" size={28} color={Colors.textPrimary} />
+          <Text style={styles.photoBtnText}>Take Photo</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.photoBtn, styles.photoBtnOutline]} onPress={handlePickImage}>
+          <Ionicons name="image" size={28} color={Colors.primary} />
+          <Text style={[styles.photoBtnText, styles.photoBtnTextOutline]}>Upload from Library</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }
 
-const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.background },
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: Colors.background },
 
-  // ── Header ──────────────────────────────────────────────────────────────────
-  header: {
-    flexDirection: 'row',
+  // Analyzing
+  analyzingOverlay: {
+    position: 'absolute',
+    top: 0, bottom: 0, left: 0, right: 0,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    gap: Spacing.md,
   },
-  closeBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.surfaceElevated,
+  analyzingSpinnerWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: FontSize.lg,
+  analyzingTitle: {
+    fontSize: FontSize.xl,
     fontWeight: '700',
     color: Colors.textPrimary,
+    marginTop: Spacing.sm,
   },
-  headerSaveBtn: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 6,
-    backgroundColor: Colors.primary,
-    borderRadius: Radius.full,
-    minWidth: 58,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerSaveBtnDisabled: { opacity: 0.38 },
-  headerSaveBtnText: { fontSize: FontSize.sm, fontWeight: '700', color: Colors.background },
+  analyzingSubtitle: { fontSize: FontSize.sm, color: Colors.textSecondary },
 
-  // ── Form ─────────────────────────────────────────────────────────────────────
-  content: { padding: Spacing.md, paddingBottom: Spacing.xxl },
-
-  group: { marginBottom: Spacing.lg },
-  label: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.textSecondary, marginBottom: 6, marginLeft: 2 },
-  required: { color: Colors.danger },
-  optional: { color: Colors.textMuted, fontWeight: '400' },
-
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
+  // Review
+  reviewScroll: { paddingBottom: Spacing.xxl },
+  reviewImage: { width: '100%', height: 260 },
+  reviewCard: {
+    margin: Spacing.md,
+    backgroundColor: Colors.card,
+    borderRadius: Radius.lg,
+    padding: Spacing.lg,
+    gap: Spacing.md,
     borderWidth: 1,
     borderColor: Colors.border,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm + 2,
-    gap: Spacing.sm,
   },
-  input: {
-    flex: 1,
-    fontSize: FontSize.md,
-    color: Colors.textPrimary,
-    padding: 0,
+  reviewName: { fontSize: FontSize.xxl, fontWeight: '700', color: Colors.textPrimary },
+  reviewSpecies: {
+    fontSize: FontSize.sm,
+    fontStyle: 'italic',
+    color: Colors.textSecondary,
+    marginTop: -Spacing.sm,
   },
-
-  // ── Species row ───────────────────────────────────────────────────────────
-  speciesRow: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'center' },
-
-  identifyBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: Colors.primary,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm + 4,
+  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  infoItem: {
+    width: '47%',
+    backgroundColor: Colors.surfaceElevated,
     borderRadius: Radius.md,
-    minWidth: 88,
-    justifyContent: 'center',
+    padding: Spacing.md,
+    gap: 4,
   },
-  identifyBtnDisabled: { backgroundColor: Colors.surfaceElevated },
-  identifyBtnText: { fontSize: FontSize.sm, fontWeight: '700', color: Colors.background },
-  identifyBtnTextOff: { color: Colors.textMuted },
-
-  helper: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: 6, marginLeft: 2 },
-  inlineErr: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
-  inlineErrText: { fontSize: FontSize.xs, color: Colors.danger, flex: 1 },
-
-  // ── Notes ─────────────────────────────────────────────────────────────────
-  notesWrap: { alignItems: 'flex-start', paddingVertical: Spacing.sm },
-  notesInput: { minHeight: 76, textAlignVertical: 'top' },
-
-  // ── Save error ────────────────────────────────────────────────────────────
-  saveErr: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-    backgroundColor: '#2D1010',
+  infoLabel: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginTop: 4,
+  },
+  infoValue: { fontSize: FontSize.sm, color: Colors.textPrimary, fontWeight: '600' },
+  careTipBox: {
+    backgroundColor: 'rgba(46,204,113,0.1)',
     borderRadius: Radius.md,
-    padding: Spacing.sm,
     borderWidth: 1,
-    borderColor: Colors.danger,
-    marginBottom: Spacing.md,
+    borderColor: Colors.primary,
+    padding: Spacing.md,
+    gap: 6,
   },
-  saveErrText: { flex: 1, fontSize: FontSize.sm, color: Colors.danger },
-
-  // ── Save button ───────────────────────────────────────────────────────────
+  careTipLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  careTipText: { fontSize: FontSize.sm, color: Colors.textPrimary, lineHeight: 20 },
   saveBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -477,19 +361,83 @@ const s = StyleSheet.create({
     gap: Spacing.sm,
     backgroundColor: Colors.primary,
     borderRadius: Radius.full,
-    paddingVertical: Spacing.md,
+    paddingVertical: 14,
+    marginTop: Spacing.sm,
   },
-  saveBtnDisabled: { opacity: 0.42 },
+  saveBtnDisabled: { opacity: 0.6 },
   saveBtnText: { fontSize: FontSize.md, fontWeight: '700', color: Colors.textPrimary },
-  xpPill: {
+  retakeBtn: { alignItems: 'center', paddingVertical: Spacing.sm },
+  retakeBtnText: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    textDecorationLine: 'underline',
+  },
+  errorText: { fontSize: FontSize.sm, color: Colors.danger, textAlign: 'center' },
+
+  // Capture
+  captureHeader: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  closeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.surfaceElevated,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  captureBody: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.xl,
+    gap: Spacing.md,
+    paddingBottom: Spacing.xxl,
+  },
+  captureTitle: {
+    fontSize: FontSize.hero,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  captureSubtitle: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 21,
+    maxWidth: 300,
+    marginBottom: Spacing.sm,
+  },
+  errorBox: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    backgroundColor: 'rgba(231,76,60,0.1)',
+    borderWidth: 1,
+    borderColor: Colors.danger,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    alignItems: 'flex-start',
+    width: '100%',
+  },
+  errorBoxText: { flex: 1, fontSize: FontSize.sm, color: Colors.danger, lineHeight: 20 },
+  photoBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    backgroundColor: Colors.xp,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: Radius.full,
-    marginLeft: 2,
+    justifyContent: 'center',
+    gap: Spacing.md,
+    width: '100%',
+    paddingVertical: 18,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.primary,
   },
-  xpPillText: { fontSize: FontSize.xs, fontWeight: '800', color: Colors.background },
+  photoBtnOutline: {
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    borderColor: Colors.primary,
+  },
+  photoBtnText: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.textPrimary },
+  photoBtnTextOutline: { color: Colors.primary },
 });

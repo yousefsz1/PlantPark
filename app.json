@@ -41,6 +41,14 @@
         {
           "photosPermission": "PlantPal needs photo library access so you can pick a plant photo to scan."
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#2ECC71",
+          "sounds": []
+        }
       ]
     ],
     "experiments": {
