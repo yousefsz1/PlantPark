@@ -5,6 +5,9 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Model to use — update if Google releases a newer flash variant
+const GEMINI_MODEL = 'gemini-2.5-flash';
+
 const SYSTEM_PROMPT = `You are an expert botanist and plant care specialist. Identify the plant in the photo, assess its visible health, and return EXACTLY this JSON (no markdown, no code fences, raw JSON only):
 
 {
@@ -35,8 +38,8 @@ Rules:
 - wateringDays must match wateringFrequency (e.g. "weekly" with 7 days is valid)
 - sunlight: "low" = shade-tolerant, "medium" = indirect light, "bright" = direct/strong indirect
 - healthScore must reflect what you actually see in the photo — do not default to 100 if there are visible issues
-- If isHealthy is true: healthIssues must be [] and remedies should be 2-3 general prevention tips (e.g. "Wipe leaves monthly with a damp cloth to boost photosynthesis")
-- If isHealthy is false: healthIssues lists 1-3 visible problems; remedies must address each with a specific, practical home fix (e.g. "Add a pinch of Epsom salt to soil for magnesium boost", "Mix neem oil with water and spray weekly to eliminate pests", "Trim yellow leaves with clean scissors to redirect energy to healthy growth")
+- If isHealthy is true: healthIssues must be [] and remedies should be 2-3 general prevention tips
+- If isHealthy is false: healthIssues lists 1-3 visible problems; remedies must address each with a specific, practical home fix
 - remedies must always have exactly 2-3 entries — never fewer, never more
 - Always return all fields. If unsure, make a best guess. Return ONLY JSON.`;
 
@@ -46,8 +49,8 @@ serve(async (req: Request) => {
   }
 
   try {
-    const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
-    if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured');
+    const apiKey = Deno.env.get('GEMINI_API_KEY');
+    if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
 
     const { image, mediaType } = await req.json();
     if (!image || !mediaType) throw new Error('Missing image or mediaType');
@@ -55,39 +58,44 @@ serve(async (req: Request) => {
     const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     const type = validTypes.includes(mediaType) ? mediaType : 'image/jpeg';
 
-    const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+
+    const geminiRes = await fetch(url, {
       method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 900,
-        system: SYSTEM_PROMPT,
-        messages: [
+        system_instruction: {
+          parts: [{ text: SYSTEM_PROMPT }],
+        },
+        contents: [
           {
-            role: 'user',
-            content: [
-              {
-                type: 'image',
-                source: { type: 'base64', media_type: type, data: image },
-              },
-              { type: 'text', text: 'Identify this plant and return its care requirements as JSON.' },
+            parts: [
+              { inline_data: { mime_type: type, data: image } },
+              { text: 'Identify this plant and return its care requirements as JSON.' },
             ],
           },
         ],
+        generation_config: {
+          response_mime_type: 'application/json',
+          max_output_tokens: 2048,
+          // Disable thinking — not needed for structured JSON output and
+          // was consuming most of the token budget before the response began.
+          thinking_config: { thinking_budget: 0 },
+        },
       }),
     });
 
-    if (!anthropicRes.ok) {
-      const err = await anthropicRes.text();
-      throw new Error(`Claude API error: ${err}`);
+    if (!geminiRes.ok) {
+      const err = await geminiRes.text();
+      throw new Error(`Gemini API error: ${err}`);
     }
 
-    const result = await anthropicRes.json();
-    const raw = result.content?.[0]?.text ?? '';
+    const result = await geminiRes.json();
+    const candidate = result.candidates?.[0];
+    if (candidate?.finishReason === 'MAX_TOKENS') {
+      throw new Error('Gemini response truncated (MAX_TOKENS) — increase max_output_tokens');
+    }
+    const raw = candidate?.content?.parts?.[0]?.text ?? '';
 
     // Strip any accidental markdown fences
     const jsonStr = raw.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim();
@@ -104,3 +112,30 @@ serve(async (req: Request) => {
     });
   }
 });
+
+// ── Claude backup (restore by replacing the serve() block above) ────────────
+//
+// import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+// const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+// const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+//   method: 'POST',
+//   headers: {
+//     'x-api-key': apiKey,
+//     'anthropic-version': '2023-06-01',
+//     'content-type': 'application/json',
+//   },
+//   body: JSON.stringify({
+//     model: 'claude-sonnet-4-6',
+//     max_tokens: 900,
+//     system: SYSTEM_PROMPT,
+//     messages: [{
+//       role: 'user',
+//       content: [
+//         { type: 'image', source: { type: 'base64', media_type: type, data: image } },
+//         { type: 'text', text: 'Identify this plant and return its care requirements as JSON.' },
+//       ],
+//     }],
+//   }),
+// });
+// const result = await anthropicRes.json();
+// const raw = result.content?.[0]?.text ?? '';

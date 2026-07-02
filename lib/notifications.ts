@@ -26,8 +26,8 @@ export async function scheduleTaskNotification(
 ): Promise<string | null> {
   if (Platform.OS === 'web' || taskType !== 'watering') return null;
   try {
-    // ⚠️ TEST MODE — fires 90 s from now instead of at 9 AM on due date.
-    // Revert to the DATE trigger block below before shipping.
+    const triggerDate = new Date(`${dueDateStr}T09:00:00`);
+    if (triggerDate <= new Date()) return null;
     const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: WATERING_CONTENT.title,
@@ -36,29 +36,11 @@ export async function scheduleTaskNotification(
         data: plantId ? { plantId } : undefined,
       },
       trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-        seconds: 90,
-        repeats: false,
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: triggerDate,
       },
     });
     return id;
-
-    // ── Production trigger (restore after testing) ──────────────────────────
-    // const triggerDate = new Date(`${dueDateStr}T09:00:00`);
-    // if (triggerDate <= new Date()) return null;
-    // const id = await Notifications.scheduleNotificationAsync({
-    //   content: {
-    //     title: WATERING_CONTENT.title,
-    //     body:  WATERING_CONTENT.body(plantName),
-    //     sound: true,
-    //     data: plantId ? { plantId } : undefined,
-    //   },
-    //   trigger: {
-    //     type: Notifications.SchedulableTriggerInputTypes.DATE,
-    //     date: triggerDate,
-    //   },
-    // });
-    // return id;
   } catch {
     return null;
   }

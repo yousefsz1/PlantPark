@@ -15,7 +15,7 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../lib/supabase';
-import { requestNotificationPermission, scheduleTaskNotification } from '../lib/notifications';
+import { requestNotificationPermission, scheduleTaskNotification, cancelPlantNotifications } from '../lib/notifications';
 import { Colors, Spacing, Radius, FontSize } from '../constants/theme';
 
 type Phase = 'capture' | 'analyzing' | 'review';
@@ -188,6 +188,7 @@ export default function AddPlantScreen() {
 
       const hasPermission = await requestNotificationPermission();
       if (hasPermission) {
+        await cancelPlantNotifications(plant.id);
         for (const t of taskInserts) {
           if (t.task_type !== 'watering') continue;
           scheduleTaskNotification(detected.name, t.task_type, t.due_date, plant.id).catch(() => {});

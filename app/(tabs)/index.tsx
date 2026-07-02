@@ -37,6 +37,11 @@ function greeting(): string {
   return 'Good evening';
 }
 
+function nameFromEmail(email: string): string {
+  const part = email.split('@')[0].split(/[._-]/)[0];
+  return part.charAt(0).toUpperCase() + part.slice(1);
+}
+
 function greetingIcon(): 'sunny-outline' | 'partly-sunny-outline' | 'moon-outline' {
   const h = new Date().getHours();
   if (h < 12) return 'sunny-outline';
@@ -278,6 +283,7 @@ export default function GardenScreen() {
   const [plants, setPlants]             = useState<Plant[]>([]);
   const [pendingTasks, setPendingTasks] = useState<CareTaskWithPlant[]>([]);
   const [totalXP, setTotalXP]           = useState(0);
+  const [displayName, setDisplayName]   = useState('');
   const [loading, setLoading]           = useState(true);
   const [refreshing, setRefreshing]     = useState(false);
   const [error, setError]               = useState<string | null>(null);
@@ -289,7 +295,7 @@ export default function GardenScreen() {
     setError(null);
     const today = todayISO();
 
-    const [plantsRes, tasksRes, profileRes] = await Promise.all([
+    const [plantsRes, tasksRes, profileRes, userRes] = await Promise.all([
       supabase.from('plants').select('*').order('created_at', { ascending: true }),
       supabase
         .from('care_tasks')
@@ -299,6 +305,7 @@ export default function GardenScreen() {
         .is('completed_at', null)
         .order('due_date'),
       supabase.from('profiles').select('total_xp').maybeSingle(),
+      supabase.auth.getUser(),
     ]);
 
     if (plantsRes.error) {
@@ -308,6 +315,12 @@ export default function GardenScreen() {
     }
     setPendingTasks((tasksRes.data ?? []) as CareTaskWithPlant[]);
     setTotalXP(profileRes.data?.total_xp ?? 0);
+
+    const authUser = userRes.data?.user;
+    const resolvedName =
+      (authUser?.user_metadata?.display_name as string | undefined)?.trim() ||
+      (authUser?.email ? nameFromEmail(authUser.email) : '');
+    setDisplayName(resolvedName);
   }, []);
 
   useFocusEffect(
@@ -334,6 +347,7 @@ export default function GardenScreen() {
 
       const result = data as { next_due_date: string; task_type: string; new_xp: number; xp_reward: number } | null;
       if (result?.next_due_date && task.plants?.name && result.task_type === 'watering') {
+        cancelPlantNotifications(task.plant_id).catch(() => {});
         scheduleTaskNotification(
           task.plants.name,
           result.task_type,
@@ -457,7 +471,7 @@ export default function GardenScreen() {
               <Ionicons name={greetingIcon()} size={14} color={Colors.textSecondary} />
               <Text style={styles.greeting}>{greeting()}</Text>
             </View>
-            <Text style={styles.title}>My Garden</Text>
+            <Text style={styles.title}>{displayName || 'there'}</Text>
           </View>
           <TouchableOpacity style={styles.addBtn} onPress={openAddPlant}>
             <Ionicons name="add" size={24} color={Colors.textPrimary} />

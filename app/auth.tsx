@@ -37,6 +37,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function AuthScreen() {
   const [mode, setMode] = useState<Mode>('login');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -54,6 +55,7 @@ export default function AuthScreen() {
   }
 
   function validate(): string | null {
+    if (mode === 'signup' && !name.trim()) return 'Your name is required.';
     if (!email.trim()) return 'Email is required.';
     if (!EMAIL_RE.test(email.trim())) return 'Enter a valid email address.';
     if (!password) return 'Password is required.';
@@ -76,6 +78,7 @@ export default function AuthScreen() {
         const { data, error: err } = await supabase.auth.signUp({
           email: email.trim(),
           password,
+          options: { data: { display_name: name.trim() } },
         });
         if (err) {
           setError(friendlyError(err.message));
@@ -176,6 +179,28 @@ export default function AuthScreen() {
 
           {/* ── Form ── */}
           <View style={styles.form}>
+            {/* Name — signup only */}
+            {mode === 'signup' && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Your name</Text>
+                <View style={styles.inputRow}>
+                  <Ionicons name="person-outline" size={18} color={Colors.textMuted} />
+                  <TextInput
+                    style={styles.textInput}
+                    value={name}
+                    onChangeText={(v) => { setName(v); clearError(); }}
+                    placeholder="e.g. Yousef"
+                    placeholderTextColor={Colors.textMuted}
+                    autoCapitalize="words"
+                    autoCorrect={false}
+                    textContentType="name"
+                    returnKeyType="next"
+                    editable={!loading}
+                  />
+                </View>
+              </View>
+            )}
+
             {/* Email */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Email address</Text>

@@ -16,7 +16,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useRouter, useIsFocused } from 'expo-router';
 import { supabase } from '../../lib/supabase';
-import { requestNotificationPermission, scheduleTaskNotification } from '../../lib/notifications';
+import { requestNotificationPermission, scheduleTaskNotification, cancelPlantNotifications } from '../../lib/notifications';
 import { Colors, Spacing, Radius, FontSize } from '../../constants/theme';
 
 type HealthStatus = 'healthy' | 'mild' | 'serious' | 'critical';
@@ -253,6 +253,7 @@ export default function ScanScreen() {
 
       const hasPermission = await requestNotificationPermission();
       if (hasPermission) {
+        await cancelPlantNotifications(plant.id);
         for (const t of taskInserts) {
           if (t.task_type !== 'watering') continue;
           scheduleTaskNotification(result.name, t.task_type, t.due_date, plant.id).catch(() => {});
