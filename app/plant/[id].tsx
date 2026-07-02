@@ -1,0 +1,867 @@
+import { useState, useCallback, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Dimensions,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
+import { supabase } from '../../lib/supabase';
+import { scheduleTaskNotification, cancelPlantNotifications } from '../../lib/notifications';
+import { getLevel, xpToNextLevel } from '../../lib/levels';
+import type { Plant, CareTask, PlantPhoto } from '../../types/database';
+import { Colors, Spacing, Radius, FontSize } from '../../constants/theme';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const PHOTO_COL_SIZE = (SCREEN_WIDTH - Spacing.md * 2 - Spacing.sm * 2) / 3;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function getMood(health: number): { icon: 'happy' | 'remove-circle-outline' | 'sad-outline'; color: string } {
+  if (health >= 80) return { icon: 'happy',                 color: Colors.primary };
+  if (health >= 50) return { icon: 'remove-circle-outline', color: Colors.warning };
+  return               { icon: 'sad-outline',               color: Colors.danger  };
+}
+
+function getWateringStatus(task: CareTask | null): {
+  text: string;
+  color: string;
+  urgent: boolean;
+} {
+  if (!task) return { text: 'No watering reminder set', color: Colors.textMuted, urgent: false };
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(`${task.due_date}T00:00:00`);
+  const diff = Math.round((due.getTime() - today.getTime()) / 86_400_000);
+  if (diff < 0) {
+    const n = Math.abs(diff);
+    return { text: `Overdue by ${n} day${n !== 1 ? 's' : ''} — water now!`, color: Colors.danger, urgent: true };
+  }
+  if (diff === 0) return { text: 'Water today!', color: Colors.warning, urgent: true };
+  if (diff === 1) return { text: 'Water tomorrow', color: Colors.primary, urgent: false };
+  return { text: `Water in ${diff} days`, color: Colors.primary, urgent: false };
+}
+
+function getWateringProgress(task: CareTask | null): { pct: number; color: string } | null {
+  if (!task) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due   = new Date(`${task.due_date}T00:00:00`);
+  const start = new Date(due);
+  start.setDate(start.getDate() - task.interval_days);
+  const total   = due.getTime() - start.getTime();
+  const elapsed = today.getTime() - start.getTime();
+  const ratio   = total > 0 ? elapsed / total : 0;
+  const color =
+    ratio <= 0.6 ? Colors.primary :
+    ratio <= 0.85 ? Colors.warning :
+    ratio <= 1.0  ? Colors.serious :
+    Colors.danger;
+  return { pct: Math.min(ratio, 1) * 100, color };
+}
+
+const SUNLIGHT_LABELS: Record<string, string> = {
+  low: 'Low Light',
+  medium: 'Indirect Light',
+  bright: 'Bright Direct',
+};
+
+const WATERING_LABELS: Record<string, string> = {
+  daily: 'Daily',
+  weekly: 'Weekly',
+  monthly: 'Monthly',
+};
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
+
+export default function PlantDetailScreen() {
+  const params = useLocalSearchParams<{ id: string }>();
+  const plantId = Array.isArray(params.id) ? params.id[0] : params.id;
+  const router = useRouter();
+
+  const [plant, setPlant]                 = useState<Plant | null>(null);
+  const [wateringTask, setWateringTask]   = useState<CareTask | null>(null);
+  const [progressPhotos, setProgressPhotos] = useState<PlantPhoto[]>([]);
+  const [totalXP, setTotalXP]             = useState(0);
+  const [loading, setLoading]             = useState(true);
+  const [markingWatered, setMarkingWatered] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [deleting, setDeleting]             = useState(false);
+  const hasLoaded = useRef(false);
+
+  const fetchData = useCallback(async () => {
+    if (!plantId) return;
+
+    const [plantRes, taskRes, photosRes, profileRes] = await Promise.all([
+      supabase.from('plants').select('*').eq('id', plantId).single(),
+      supabase
+        .from('care_tasks')
+        .select('*')
+        .eq('plant_id', plantId)
+        .eq('task_type', 'watering')
+        .is('completed_at', null)
+        .order('due_date')
+        .limit(1),
+      supabase
+        .from('plant_photos')
+        .select('*')
+        .eq('plant_id', plantId)
+        .order('created_at', { ascending: false }),
+      supabase.from('profiles').select('total_xp').maybeSingle(),
+    ]);
+
+    if (plantRes.data)  setPlant(plantRes.data);
+    setWateringTask(taskRes.data?.[0] ?? null);
+    setProgressPhotos((photosRes.data ?? []) as PlantPhoto[]);
+    setTotalXP(profileRes.data?.total_xp ?? 0);
+  }, [plantId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!hasLoaded.current) setLoading(true);
+      fetchData().finally(() => {
+        setLoading(false);
+        hasLoaded.current = true;
+      });
+    }, [fetchData]),
+  );
+
+  // ── Delete plant ─────────────────────────────────────────────────────────────
+  const handleDeletePlant = useCallback(() => {
+    if (!plant) return;
+    Alert.alert(
+      `Delete ${plant.name}?`,
+      "This can't be undone. All care tasks and photos will be removed.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              cancelPlantNotifications(plantId).catch(() => {});
+
+              // Collect Storage paths before cascade-delete removes DB rows
+              const paths: string[] = [];
+              if (plant.photo_url) {
+                const marker = '/plant-images/';
+                const idx = plant.photo_url.indexOf(marker);
+                if (idx !== -1) paths.push(plant.photo_url.slice(idx + marker.length));
+              }
+              for (const ph of progressPhotos) {
+                const marker = '/plant-images/';
+                const idx = ph.photo_url.indexOf(marker);
+                if (idx !== -1) paths.push(ph.photo_url.slice(idx + marker.length));
+              }
+
+              const { error: delErr } = await supabase
+                .from('plants')
+                .delete()
+                .eq('id', plantId);
+              if (delErr) throw delErr;
+
+              if (paths.length > 0) {
+                supabase.storage.from('plant-images').remove(paths).catch(() => {});
+              }
+
+              router.replace('/(tabs)');
+            } catch (err) {
+              Alert.alert('Error', err instanceof Error ? err.message : 'Failed to delete plant');
+              setDeleting(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [plant, plantId, progressPhotos, router]);
+
+  // ── Mark as watered ──────────────────────────────────────────────────────────
+  const handleMarkWatered = useCallback(async () => {
+    if (!wateringTask) return;
+    setMarkingWatered(true);
+    try {
+      const { data, error } = await supabase.rpc('complete_care_task', { task_id: wateringTask.id });
+      if (error) throw error;
+
+      const result = data as { next_due_date: string; new_xp: number; xp_reward: number } | null;
+      if (result?.next_due_date && plant?.name) {
+        scheduleTaskNotification(plant.name, 'watering', result.next_due_date, plantId).catch(() => {});
+      }
+
+      // Journal entries (fire-and-forget)
+      if (plant) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const xp = result?.xp_reward ?? 10;
+          const jRows: { plant_id: string; user_id: string; entry_type: string; message: string }[] = [
+            { plant_id: plantId, user_id: user.id, entry_type: 'watered', message: `Watered ${plant.name} +${xp} XP` },
+          ];
+          if (result?.new_xp && getLevel(result.new_xp).name !== getLevel(totalXP).name) {
+            jRows.push({
+              plant_id: plantId, user_id: user.id, entry_type: 'level_up',
+              message: `${plant.name} reached ${getLevel(result.new_xp).name} — great work!`,
+            });
+          }
+          supabase.from('journal_entries').insert(jRows).then(null, () => {});
+        }
+      }
+
+      await fetchData();
+    } catch (err) {
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to update watering');
+    } finally {
+      setMarkingWatered(false);
+    }
+  }, [wateringTask, plant, fetchData]);
+
+  // ── Add progress photo ───────────────────────────────────────────────────────
+  const handleAddProgressPhoto = useCallback(async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Photo library access is required.');
+      return;
+    }
+    const picked = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1.0 });
+    if (picked.canceled || !picked.assets?.[0]) return;
+
+    setUploadingPhoto(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const compressed = await ImageManipulator.manipulateAsync(
+        picked.assets[0].uri,
+        [{ resize: { width: 1024 } }],
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+      );
+
+      const bytes = Uint8Array.from(atob(compressed.base64!), c => c.charCodeAt(0));
+      const storagePath = `${user.id}/progress/${plantId}/${Date.now()}.jpg`;
+
+      const { data: up, error: upErr } = await supabase.storage
+        .from('plant-images')
+        .upload(storagePath, bytes, { contentType: 'image/jpeg', upsert: false });
+      if (upErr) throw upErr;
+
+      const { data: urlData } = supabase.storage.from('plant-images').getPublicUrl(up.path);
+
+      const { error: insertErr } = await supabase.from('plant_photos').insert({
+        plant_id: plantId,
+        user_id: user.id,
+        photo_url: urlData.publicUrl,
+      });
+      if (insertErr) throw insertErr;
+
+      await fetchData();
+    } catch (err) {
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to upload photo');
+    } finally {
+      setUploadingPhoto(false);
+    }
+  }, [plantId, fetchData]);
+
+  // ── Loading / not found ──────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+      </View>
+    );
+  }
+
+  if (!plant) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.centered}>
+          <Text style={styles.notFoundText}>Plant not found</Text>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backLink}>
+            <Text style={styles.backLinkText}>← Go back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ── Derived state ────────────────────────────────────────────────────────────
+  const level = getLevel(totalXP);
+  const { pct: xpPct, needed: xpNeeded } = xpToNextLevel(totalXP);
+  const { icon: moodIcon, color: moodColor } = getMood(plant.health_percent);
+  const watering         = getWateringStatus(wateringTask);
+  const wateringProgress = getWateringProgress(wateringTask);
+
+  const infoItems = [
+    { icon: 'water-outline',       label: 'Watering',     value: plant.watering_frequency ? WATERING_LABELS[plant.watering_frequency] : '—' },
+    { icon: 'sunny-outline',       label: 'Sunlight',     value: plant.sunlight ? SUNLIGHT_LABELS[plant.sunlight] : '—' },
+    { icon: 'earth-outline',       label: 'Soil',         value: plant.soil_type ?? '—' },
+    { icon: 'thermometer-outline', label: 'Temperature',  value: plant.temperature_range ?? '—' },
+  ] as const;
+
+  // ── Render ───────────────────────────────────────────────────────────────────
+  return (
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+
+        {/* ── Hero ── */}
+        <View style={styles.hero}>
+          {plant.photo_url ? (
+            <Image source={{ uri: plant.photo_url }} style={styles.heroImage} resizeMode="cover" />
+          ) : (
+            <View style={[styles.heroImage, styles.heroPlaceholder]}>
+              <Ionicons name="leaf-outline" size={80} color={Colors.primary} style={{ opacity: 0.45 }} />
+            </View>
+          )}
+          {/* Dark gradient overlay at bottom of hero */}
+          <View style={styles.heroGradient} />
+          {/* Back button */}
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+          </TouchableOpacity>
+          {/* Delete button */}
+          <TouchableOpacity
+            style={[styles.trashBtn, deleting && styles.disabled]}
+            onPress={handleDeletePlant}
+            disabled={deleting}
+          >
+            {deleting ? (
+              <ActivityIndicator size="small" color={Colors.danger} />
+            ) : (
+              <Ionicons name="trash-outline" size={20} color={Colors.danger} />
+            )}
+          </TouchableOpacity>
+          {/* Name / species over photo */}
+          <View style={styles.heroMeta}>
+            <Text style={styles.heroName}>{plant.name}</Text>
+            {plant.species ? <Text style={styles.heroSpecies}>{plant.species}</Text> : null}
+          </View>
+        </View>
+
+        {/* ── Stats card (floats over hero bottom) ── */}
+        <View style={styles.statsCard}>
+          <View style={styles.statsRow}>
+            <View style={styles.levelChip}>
+              <Ionicons name="leaf" size={11} color={Colors.textPrimary} />
+              <Text style={styles.levelChipText}>{level.name}</Text>
+            </View>
+            <Text style={styles.xpLabel}>{totalXP.toLocaleString()} XP</Text>
+          </View>
+          <View style={styles.barTrack}>
+            <View style={[styles.barFill, styles.xpFill, { width: `${xpPct}%` }]} />
+          </View>
+          {xpNeeded > 0 && (
+            <Text style={styles.xpNext}>{xpNeeded} XP to next level</Text>
+          )}
+
+          <View style={[styles.statsRow, { marginTop: Spacing.sm }]}>
+            <View style={styles.healthLabelRow}>
+              <Ionicons name={moodIcon} size={13} color={moodColor} />
+              <Text style={styles.healthLabel}>Health</Text>
+            </View>
+            <Text style={[styles.healthPct, { color: moodColor }]}>{plant.health_percent}%</Text>
+          </View>
+          <View style={styles.barTrack}>
+            <View style={[styles.barFill, { width: `${plant.health_percent}%`, backgroundColor: moodColor }]} />
+          </View>
+        </View>
+
+        {/* ── Next watering ── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Next Watering</Text>
+          <View style={[styles.waterCard, watering.urgent && styles.waterCardUrgent]}>
+            <Ionicons name="water" size={36} color={watering.color} style={{ marginBottom: 4 }} />
+            <Text style={[styles.waterText, { color: watering.color }]}>{watering.text}</Text>
+            {wateringProgress !== null && (
+              <View style={styles.waterProgressTrack}>
+                <View
+                  style={[
+                    styles.waterProgressFill,
+                    {
+                      width:           `${wateringProgress.pct}%` as any,
+                      backgroundColor: wateringProgress.color,
+                    },
+                  ]}
+                />
+              </View>
+            )}
+            {wateringTask ? (
+              watering.urgent ? (
+                <TouchableOpacity
+                  style={[styles.wateredBtn, markingWatered && styles.disabled]}
+                  onPress={handleMarkWatered}
+                  disabled={markingWatered}
+                >
+                  {markingWatered ? (
+                    <ActivityIndicator size="small" color={Colors.textPrimary} />
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark-circle" size={18} color={Colors.textPrimary} />
+                      <Text style={styles.wateredBtnText}>Mark as Watered  +10 XP</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.wateredBtnLocked}>
+                  <Ionicons name="lock-closed-outline" size={15} color={Colors.textMuted} />
+                  <Text style={styles.wateredBtnLockedText}>Available when due</Text>
+                </View>
+              )
+            ) : (
+              <Text style={styles.noTaskHint}>
+                Add this plant via the new flow to auto-create watering reminders.
+              </Text>
+            )}
+          </View>
+        </View>
+
+        {/* ── Care requirements ── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Care Requirements</Text>
+          <View style={styles.infoGrid}>
+            {infoItems.map(({ icon, label, value }) => (
+              <View key={label} style={styles.infoItem}>
+                <Ionicons name={icon as any} size={20} color={Colors.primary} />
+                <Text style={styles.infoLabel}>{label}</Text>
+                <Text style={styles.infoValue} numberOfLines={2}>{value}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        {/* ── AI care tip ── */}
+        {plant.care_tip ? (
+          <View style={styles.section}>
+            <View style={styles.tipBox}>
+              <Text style={styles.tipBoxLabel}>AI Care Tip</Text>
+              <Text style={styles.tipBoxText}>{plant.care_tip}</Text>
+            </View>
+          </View>
+        ) : null}
+
+        {/* ── Health tips & troubleshooting ── */}
+        {plant.health_remedies && plant.health_remedies.length > 0 ? (() => {
+          const hasIssues = (plant.health_issues?.length ?? 0) > 0;
+          return (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Health Tips & Troubleshooting</Text>
+              <View style={[styles.healthCard, hasIssues && styles.healthCardWarning]}>
+                <View style={styles.healthCardHeader}>
+                  <Ionicons
+                    name={hasIssues ? 'warning' : 'shield-checkmark'}
+                    size={26}
+                    color={hasIssues ? Colors.warning : Colors.primary}
+                    style={{ marginTop: 2 }}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.healthCardTitle, hasIssues && styles.healthCardTitleWarning]}>
+                      {hasIssues ? 'Issues Detected' : 'Looking Healthy!'}
+                    </Text>
+                    <Text style={styles.healthCardSubtitle}>
+                      {hasIssues ? 'Try these home remedies' : 'Prevention tips to keep it thriving'}
+                    </Text>
+                  </View>
+                </View>
+
+                {hasIssues && (
+                  <View style={styles.issueChips}>
+                    {plant.health_issues!.map((issue, i) => (
+                      <View key={i} style={styles.issueChip}>
+                        <Text style={styles.issueChipText}>{issue}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                <View style={styles.remediesList}>
+                  {plant.health_remedies!.map((remedy, i) => (
+                    <View key={i} style={[styles.remedyRow, hasIssues && styles.remedyRowWarning]}>
+                      <View style={[styles.remedyBadge, hasIssues && styles.remedyBadgeWarning]}>
+                        <Text style={styles.remedyBadgeText}>{i + 1}</Text>
+                      </View>
+                      <Text style={styles.remedyText}>{remedy}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            </View>
+          );
+        })() : null}
+
+        {/* ── Growth timeline ── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Growth Timeline</Text>
+          {progressPhotos.length > 0 ? (
+            <View style={styles.photoGrid}>
+              {progressPhotos.map(photo => (
+                <View key={photo.id} style={styles.photoCell}>
+                  <Image
+                    source={{ uri: photo.photo_url }}
+                    style={styles.photoCellImg}
+                    resizeMode="cover"
+                  />
+                  <Text style={styles.photoCellDate}>
+                    {new Date(photo.created_at).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.noPhotosText}>
+              No progress photos yet — add one to start your growth timeline.
+            </Text>
+          )}
+
+          <TouchableOpacity
+            style={[styles.addPhotoBtn, uploadingPhoto && styles.disabled]}
+            onPress={handleAddProgressPhoto}
+            disabled={uploadingPhoto}
+          >
+            {uploadingPhoto ? (
+              <>
+                <ActivityIndicator size="small" color={Colors.primary} />
+                <Text style={styles.addPhotoBtnText}>Uploading...</Text>
+              </>
+            ) : (
+              <>
+                <Ionicons name="camera-outline" size={20} color={Colors.primary} />
+                <Text style={styles.addPhotoBtnText}>Add Progress Photo</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const styles = StyleSheet.create({
+  safe:    { flex: 1, backgroundColor: Colors.background },
+  centered: { flex: 1, backgroundColor: Colors.background, justifyContent: 'center', alignItems: 'center' },
+  scroll:  { paddingBottom: Spacing.xxl },
+  notFoundText: { fontSize: FontSize.lg, color: Colors.textPrimary },
+  backLink:     { marginTop: Spacing.md },
+  backLinkText: { fontSize: FontSize.sm, color: Colors.primary },
+
+  // Hero
+  hero: { height: 280, position: 'relative' },
+  heroImage: { width: '100%', height: '100%' },
+  heroPlaceholder: {
+    backgroundColor: Colors.surfaceElevated,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  heroGradient: {
+    position: 'absolute',
+    bottom: 0, left: 0, right: 0,
+    height: 130,
+    backgroundColor: 'rgba(13,40,24,0.72)',
+  },
+  backBtn: {
+    position: 'absolute',
+    top: Spacing.md,
+    left: Spacing.md,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  trashBtn: {
+    position: 'absolute',
+    top: Spacing.md,
+    right: Spacing.md,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(231,76,60,0.4)',
+  },
+  heroMeta: {
+    position: 'absolute',
+    bottom: Spacing.md,
+    left: Spacing.md,
+    right: Spacing.md,
+  },
+  heroName: {
+    fontSize: FontSize.xxl,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
+  },
+  heroSpecies: {
+    fontSize: FontSize.sm,
+    fontStyle: 'italic',
+    color: 'rgba(255,255,255,0.82)',
+    marginTop: 2,
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+
+  // Stats card
+  statsCard: {
+    marginHorizontal: Spacing.md,
+    marginTop: -Spacing.xl,
+    backgroundColor: Colors.card,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  levelChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: Colors.primaryDark,
+    borderRadius: Radius.full,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  levelChipText: { fontSize: FontSize.sm, fontWeight: '700', color: Colors.textPrimary },
+  xpLabel:  { fontSize: FontSize.sm, fontWeight: '600', color: Colors.xp },
+  xpNext:   { fontSize: FontSize.xs, color: Colors.textMuted },
+  healthLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  barTrack: {
+    height: 6,
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: Radius.full,
+    overflow: 'hidden',
+  },
+  barFill: { height: '100%', borderRadius: Radius.full },
+  xpFill:  { backgroundColor: Colors.xp },
+  healthLabel: { fontSize: FontSize.xs, color: Colors.textMuted },
+  healthPct:   { fontSize: FontSize.xs, fontWeight: '700' },
+
+  // Sections
+  section: {
+    marginHorizontal: Spacing.md,
+    marginTop: Spacing.lg,
+  },
+  sectionTitle: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: Spacing.sm,
+  },
+
+  // Info grid
+  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  infoItem: {
+    width: '47%',
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  infoLabel: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginTop: 4,
+  },
+  infoValue: { fontSize: FontSize.sm, color: Colors.textPrimary, fontWeight: '600' },
+
+  // Care tip
+  tipBox: {
+    backgroundColor: 'rgba(46,204,113,0.1)',
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    padding: Spacing.md,
+    gap: 6,
+  },
+  tipBoxLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  tipBoxText: { fontSize: FontSize.sm, color: Colors.textPrimary, lineHeight: 20 },
+
+  // Health tips & troubleshooting
+  healthCard: {
+    backgroundColor: 'rgba(46,204,113,0.07)',
+    borderRadius: Radius.lg,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    padding: Spacing.md,
+    gap: Spacing.md,
+  },
+  healthCardWarning: {
+    backgroundColor: 'rgba(243,156,18,0.08)',
+    borderColor: Colors.warning,
+  },
+  healthCardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
+  healthCardTitle: {
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  healthCardTitleWarning: { color: Colors.warning },
+  healthCardSubtitle: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: 2 },
+  issueChips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  issueChip: {
+    backgroundColor: 'rgba(243,156,18,0.15)',
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    borderColor: Colors.warning,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  issueChipText: { fontSize: FontSize.xs, fontWeight: '600', color: Colors.warning },
+  remediesList: { gap: Spacing.sm },
+  remedyRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(46,204,113,0.07)',
+    borderRadius: Radius.md,
+    padding: Spacing.sm,
+  },
+  remedyRowWarning: { backgroundColor: 'rgba(243,156,18,0.07)' },
+  remedyBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+    marginTop: 1,
+  },
+  remedyBadgeWarning: { backgroundColor: Colors.warning },
+  remedyBadgeText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.background },
+  remedyText: { flex: 1, fontSize: FontSize.sm, color: Colors.textPrimary, lineHeight: 20 },
+
+  // Watering
+  waterCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing.lg,
+    alignItems: 'center',
+    gap: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  waterCardUrgent: {
+    borderColor: Colors.warning,
+    backgroundColor: 'rgba(243,156,18,0.07)',
+  },
+  waterText:  { fontSize: FontSize.lg, fontWeight: '700', textAlign: 'center' },
+  waterProgressTrack: {
+    width: '100%',
+    height: 7,
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: Radius.full,
+    overflow: 'hidden',
+    marginTop: Spacing.sm,
+  },
+  waterProgressFill: {
+    height: '100%',
+    borderRadius: Radius.full,
+  },
+  wateredBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.full,
+    paddingVertical: 12,
+    paddingHorizontal: Spacing.xl,
+    marginTop: Spacing.sm,
+    width: '100%',
+  },
+  wateredBtnText: { fontSize: FontSize.sm, fontWeight: '700', color: Colors.textPrimary },
+  wateredBtnLocked: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: Radius.full,
+    paddingVertical: 12,
+    paddingHorizontal: Spacing.xl,
+    marginTop: Spacing.sm,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  wateredBtnLockedText: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.textMuted },
+  noTaskHint: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginTop: Spacing.xs,
+  },
+  disabled: { opacity: 0.6 },
+
+  // Progress photos
+  photoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  photoCell: { width: PHOTO_COL_SIZE, gap: 4 },
+  photoCellImg: {
+    width: PHOTO_COL_SIZE,
+    height: PHOTO_COL_SIZE,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.surfaceElevated,
+  },
+  photoCellDate: { fontSize: FontSize.xs, color: Colors.textMuted, textAlign: 'center' },
+  noPhotosText: {
+    fontSize: FontSize.sm,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: Spacing.md,
+  },
+  addPhotoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    borderRadius: Radius.lg,
+    paddingVertical: 14,
+    backgroundColor: 'rgba(46,204,113,0.06)',
+  },
+  addPhotoBtnText: { fontSize: FontSize.md, fontWeight: '600', color: Colors.primary },
+});

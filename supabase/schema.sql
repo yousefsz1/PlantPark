@@ -150,6 +150,10 @@ BEGIN
     RAISE EXCEPTION 'Task not found, already completed, or unauthorized';
   END IF;
 
+  IF v_task.due_date > CURRENT_DATE THEN
+    RAISE EXCEPTION 'Too early: task is not due until %', v_task.due_date;
+  END IF;
+
   UPDATE care_tasks SET completed_at = NOW() WHERE id = task_id;
 
   SELECT health_percent INTO v_plant_health FROM plants WHERE id = v_task.plant_id;
@@ -162,7 +166,10 @@ BEGIN
   END;
 
   v_new_health := LEAST(v_plant_health + v_health_boost, 100);
-  UPDATE plants SET health_percent = v_new_health WHERE id = v_task.plant_id;
+  UPDATE plants
+    SET health_percent = v_new_health,
+        last_watered   = CASE WHEN v_task.task_type = 'watering' THEN NOW() ELSE last_watered END
+    WHERE id = v_task.plant_id;
 
   v_next_due := CURRENT_DATE + v_task.interval_days;
   INSERT INTO care_tasks (plant_id, user_id, task_type, due_date, xp_reward, interval_days)
@@ -227,3 +234,60 @@ CREATE POLICY IF NOT EXISTS "plant_images_auth_delete"
 
 ALTER TABLE public.plants
   ADD COLUMN IF NOT EXISTS photo_url TEXT;
+
+-- ─── Plants table: health diagnostics ────────────────────────────────────────
+
+ALTER TABLE public.plants
+  ADD COLUMN IF NOT EXISTS health_issues   TEXT[],
+  ADD COLUMN IF NOT EXISTS health_remedies TEXT[];
+
+NOTIFY pgrst, 'reload schema';
+
+-- ─── Journal entries ─────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS public.journal_entries (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  plant_id   UUID        REFERENCES public.plants(id) ON DELETE SET NULL,
+  user_id    UUID        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  entry_type TEXT        NOT NULL CHECK (entry_type IN (
+                           'added', 'watered', 'fertilized', 'misted',
+                           'level_up', 'health_issue', 'note'
+                         )),
+  message    TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS journal_entries_user_created_idx
+  ON public.journal_entries (user_id, created_at DESC);
+
+ALTER TABLE public.journal_entries ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own journal entries"
+  ON public.journal_entries FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own journal entries"
+  ON public.journal_entries FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can delete own journal entries"
+  ON public.journal_entries FOR DELETE USING (auth.uid() = user_id);
+
+-- ─── Plant progress photos ────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS public.plant_photos (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  plant_id   UUID        NOT NULL REFERENCES public.plants(id) ON DELETE CASCADE,
+  user_id    UUID        NOT NULL REFERENCES auth.users(id)  ON DELETE CASCADE,
+  photo_url  TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS plant_photos_plant_id_idx ON public.plant_photos (plant_id);
+
+ALTER TABLE public.plant_photos ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own plant photos"
+  ON public.plant_photos FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own plant photos"
+  ON public.plant_photos FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own plant photos"
+  ON public.plant_photos FOR DELETE USING (auth.uid() = user_id);

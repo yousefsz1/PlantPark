@@ -13,8 +13,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { useRouter, useIsFocused } from 'expo-router';
 import { supabase } from '../../lib/supabase';
+import { requestNotificationPermission, scheduleTaskNotification } from '../../lib/notifications';
 import { Colors, Spacing, Radius, FontSize } from '../../constants/theme';
 
 type HealthStatus = 'healthy' | 'mild' | 'serious' | 'critical';
@@ -23,8 +25,20 @@ interface ScanResult {
   name: string;
   species: string;
   status: HealthStatus;
-  issues: string[];
-  fixPlan: string[];
+  // Care data from detect-plant
+  wateringFrequency: 'daily' | 'weekly' | 'monthly';
+  wateringDays: number;
+  sunlight: 'low' | 'medium' | 'bright';
+  soilType: string;
+  temperature: string;
+  careTip: string;
+  fertilizingDays: number;
+  mistingDays: number | null;
+  // Health diagnosis
+  isHealthy: boolean;
+  healthScore: number;
+  healthIssues: string[];
+  remedies: string[];
 }
 
 type Phase = 'camera' | 'analyzing' | 'result';
@@ -43,14 +57,10 @@ const HEALTH_MAP: Record<HealthStatus, number> = {
   critical: 15,
 };
 
-async function callAnalyzeEdge(base64: string, mediaType: string): Promise<ScanResult> {
-  const { data, error } = await supabase.functions.invoke('analyze-plant', {
-    body: { image: base64, mediaType },
-  });
-  if (error) throw new Error(error.message ?? 'Edge function error');
-  if (!data || typeof data !== 'object') throw new Error('Invalid response from analysis service');
-  if ('error' in data) throw new Error((data as { error: string }).error);
-  return data as ScanResult;
+function addDaysToToday(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 export default function ScanScreen() {
@@ -59,31 +69,73 @@ export default function ScanScreen() {
   const router = useRouter();
   const cameraRef = useRef<CameraView>(null);
 
-  const [phase, setPhase] = useState<Phase>('camera');
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [result, setResult] = useState<ScanResult | null>(null);
+  const [phase, setPhase]               = useState<Phase>('camera');
+  const [photoUri, setPhotoUri]         = useState<string | null>(null);
+  const [photoBase64, setPhotoBase64]   = useState<string | null>(null);
+  const [result, setResult]             = useState<ScanResult | null>(null);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
-  const [xpTotal, setXpTotal] = useState<number | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [xpTotal, setXpTotal]           = useState<number | null>(null);
+  const [saved, setSaved]               = useState(false);
+  const [saving, setSaving]             = useState(false);
 
-  const runAnalysis = useCallback(async (uri: string, base64: string, mediaType: string) => {
+  const runAnalysis = useCallback(async (uri: string) => {
     setPhotoUri(uri);
     setPhase('analyzing');
     setAnalyzeError(null);
     setResult(null);
     setSaved(false);
     setXpTotal(null);
+    setPhotoBase64(null);
 
     try {
-      const scanResult = await callAnalyzeEdge(base64, mediaType);
-      setResult(scanResult);
+      // Compress to 1024px / 80% JPEG — same as add-plant flow
+      const compressed = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 1024 } }],
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+      );
+      const base64 = compressed.base64!;
+      setPhotoBase64(base64);
+
+      const { data, error } = await supabase.functions.invoke('detect-plant', {
+        body: { image: base64, mediaType: 'image/jpeg' },
+      });
+      if (error) throw new Error(error.message ?? 'Edge function error');
+      if (!data || typeof data !== 'object') throw new Error('Invalid response from analysis service');
+      if ('error' in data) throw new Error((data as { error: string }).error);
+
+      const d = data as {
+        name: string; species: string;
+        wateringFrequency: 'daily' | 'weekly' | 'monthly'; wateringDays: number;
+        sunlight: 'low' | 'medium' | 'bright'; soilType: string;
+        temperature: string; careTip: string;
+        fertilizingDays: number; mistingDays: number | null;
+        isHealthy: boolean; healthScore: number; healthIssues: string[]; remedies: string[];
+      };
+
+      setResult({
+        name: d.name,
+        species: d.species,
+        status: d.healthScore >= 80 ? 'healthy' : d.healthScore >= 55 ? 'mild' : d.healthScore >= 30 ? 'serious' : 'critical',
+        wateringFrequency: d.wateringFrequency,
+        wateringDays: d.wateringDays,
+        sunlight: d.sunlight,
+        soilType: d.soilType,
+        temperature: d.temperature,
+        careTip: d.careTip,
+        fertilizingDays: d.fertilizingDays,
+        mistingDays: d.mistingDays,
+        isHealthy: d.isHealthy,
+        healthScore: d.healthScore ?? (d.isHealthy ? 100 : 65),
+        healthIssues: d.healthIssues ?? [],
+        remedies: d.remedies ?? [],
+      });
       setPhase('result');
 
-      // Award +30 XP — fire and forget, doesn't block the result screen
+      // Award +30 XP — fire and forget
       supabase
         .rpc('increment_xp', { xp_amount: 30 })
-        .then(({ data }) => setXpTotal(typeof data === 'number' ? data : 30))
+        .then(({ data: xp }) => setXpTotal(typeof xp === 'number' ? xp : 30))
         .catch(() => setXpTotal(30));
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Analysis failed. Please try again.';
@@ -95,12 +147,12 @@ export default function ScanScreen() {
   const handleCapture = useCallback(async () => {
     if (!cameraRef.current) return;
     try {
-      const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.5 });
-      if (!photo?.base64) {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 1.0 });
+      if (!photo?.uri) {
         setAnalyzeError('Failed to capture photo. Please try again.');
         return;
       }
-      await runAnalysis(photo.uri, photo.base64, 'image/jpeg');
+      await runAnalysis(photo.uri);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Could not capture photo.';
       setAnalyzeError(msg);
@@ -116,46 +168,97 @@ export default function ScanScreen() {
       );
       return;
     }
-
     const picked = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'] as ImagePicker.MediaType[],
-      base64: true,
-      quality: 0.5,
-      allowsEditing: false,
+      quality: 1.0,
     });
-
     if (picked.canceled || !picked.assets?.[0]) return;
-    const asset = picked.assets[0];
-    if (!asset.base64) {
-      setAnalyzeError('Could not read image data. Please try a different photo.');
-      return;
-    }
-
-    const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    const mediaType =
-      asset.mimeType && supportedTypes.includes(asset.mimeType) ? asset.mimeType : 'image/jpeg';
-
-    await runAnalysis(asset.uri, asset.base64, mediaType);
+    await runAnalysis(picked.assets[0].uri);
   }, [runAnalysis]);
 
   const handleSaveToGarden = useCallback(async () => {
     if (!result) return;
     setSaving(true);
     try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData.user) throw new Error('Not authenticated');
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
 
-      const { error } = await supabase.from('plants').insert({
-        user_id: userData.user.id,
-        name: result.name,
-        species: result.species,
-        level: 1,
-        xp: 0,
-        health_percent: HEALTH_MAP[result.status],
-        last_watered: null,
-      });
+      const wDays = Math.max(1, Math.round(result.wateringDays || 7));
+      const fDays = Math.max(1, Math.round(result.fertilizingDays || 14));
+      const mDays = result.mistingDays != null ? Math.max(1, Math.round(result.mistingDays)) : null;
 
-      if (error) throw new Error(error.message);
+      // Upload compressed photo to Supabase Storage (non-fatal if it fails)
+      let photoUrl: string | null = null;
+      if (photoBase64) {
+        try {
+          const bytes = Uint8Array.from(atob(photoBase64), c => c.charCodeAt(0));
+          const storagePath = `${user.id}/${Date.now()}.jpg`;
+          const { data: up, error: upErr } = await supabase.storage
+            .from('plant-images')
+            .upload(storagePath, bytes, { contentType: 'image/jpeg', upsert: false });
+          if (!upErr && up) {
+            const { data: urlData } = supabase.storage.from('plant-images').getPublicUrl(up.path);
+            photoUrl = urlData.publicUrl;
+          }
+        } catch {
+          // Upload failed — plant saved without photo
+        }
+      }
+
+      // Save plant with all detected fields — identical to add-plant flow
+      const { data: plant, error: plantErr } = await supabase
+        .from('plants')
+        .insert({
+          user_id: user.id,
+          name: result.name,
+          species: result.species,
+          watering_frequency: result.wateringFrequency,
+          sunlight: result.sunlight,
+          soil_type: result.soilType,
+          temperature_range: result.temperature,
+          care_tip: result.careTip,
+          health_percent: Math.min(100, Math.max(0, Math.round(result.healthScore))),
+          photo_url: photoUrl,
+          health_issues: result.healthIssues.length > 0 ? result.healthIssues : null,
+          health_remedies: result.remedies.length > 0 ? result.remedies : null,
+        })
+        .select('id')
+        .single();
+
+      if (plantErr || !plant) throw new Error(plantErr?.message ?? 'Failed to save plant');
+
+      // Journal entries (fire-and-forget)
+      const journalRows: { plant_id: string; user_id: string; entry_type: string; message: string }[] = [
+        { plant_id: plant.id, user_id: user.id, entry_type: 'added', message: `Added ${result.name} to your garden` },
+      ];
+      if (result.healthIssues.length > 0) {
+        journalRows.push({
+          plant_id: plant.id, user_id: user.id, entry_type: 'health_issue',
+          message: `${result.name} showing ${result.healthIssues[0].toLowerCase()} — check Health Tips`,
+        });
+      }
+      supabase.from('journal_entries').insert(journalRows).then(null, () => {});
+
+      // Create care tasks — identical to add-plant flow
+      const taskInserts = [
+        { plant_id: plant.id, user_id: user.id, task_type: 'watering' as const,    due_date: addDaysToToday(wDays), xp_reward: 10, interval_days: wDays },
+        { plant_id: plant.id, user_id: user.id, task_type: 'fertilizing' as const, due_date: addDaysToToday(fDays), xp_reward: 25, interval_days: fDays },
+        ...(mDays != null
+          ? [{ plant_id: plant.id, user_id: user.id, task_type: 'misting' as const, due_date: addDaysToToday(mDays), xp_reward: 5, interval_days: mDays }]
+          : []),
+      ];
+
+      const { error: taskErr } = await supabase.from('care_tasks').insert(taskInserts);
+      if (taskErr) throw new Error(`care_tasks: ${taskErr.message}`);
+
+      const hasPermission = await requestNotificationPermission();
+      if (hasPermission) {
+        for (const t of taskInserts) {
+          if (t.task_type !== 'watering') continue;
+          scheduleTaskNotification(result.name, t.task_type, t.due_date, plant.id).catch(() => {});
+        }
+      }
+
       setSaved(true);
       setTimeout(() => router.replace('/(tabs)'), 1200);
     } catch (err) {
@@ -166,11 +269,12 @@ export default function ScanScreen() {
     } finally {
       setSaving(false);
     }
-  }, [result, router]);
+  }, [result, photoBase64, router]);
 
   const resetScan = useCallback(() => {
     setPhase('camera');
     setPhotoUri(null);
+    setPhotoBase64(null);
     setResult(null);
     setAnalyzeError(null);
     setXpTotal(null);
@@ -254,13 +358,13 @@ export default function ScanScreen() {
             </View>
           </View>
 
-          {/* Issues */}
+          {/* Issues / health */}
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>
-              {result.issues.length > 0 ? 'Issues Detected' : 'Plant Health'}
+              {result.healthIssues.length > 0 ? 'Issues Detected' : 'Plant Health'}
             </Text>
-            {result.issues.length > 0 ? (
-              result.issues.map((issue, i) => (
+            {result.healthIssues.length > 0 ? (
+              result.healthIssues.map((issue, i) => (
                 <View key={i} style={styles.listRow}>
                   <Ionicons name="alert-circle" size={15} color={Colors.warning} style={styles.listIcon} />
                   <Text style={styles.listText}>{issue}</Text>
@@ -276,12 +380,12 @@ export default function ScanScreen() {
             )}
           </View>
 
-          {/* Fix plan */}
+          {/* Remedies / care tips */}
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>
-              {result.status === 'healthy' ? 'Care Tips' : '3-Step Fix Plan'}
+              {result.isHealthy ? 'Prevention Tips' : 'Home Remedies'}
             </Text>
-            {result.fixPlan.map((step, i) => (
+            {result.remedies.map((step, i) => (
               <View key={i} style={styles.fixRow}>
                 <View style={styles.fixNum}>
                   <Text style={styles.fixNumText}>{i + 1}</Text>

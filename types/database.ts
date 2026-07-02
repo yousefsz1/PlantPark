@@ -19,6 +19,8 @@ export type Database = {
           temperature_range: string | null;
           care_tip: string | null;
           photo_url: string | null;
+          health_issues: string[] | null;
+          health_remedies: string[] | null;
         };
         Insert: {
           id?: string;
@@ -37,6 +39,8 @@ export type Database = {
           temperature_range?: string | null;
           care_tip?: string | null;
           photo_url?: string | null;
+          health_issues?: string[] | null;
+          health_remedies?: string[] | null;
         };
         Update: {
           id?: string;
@@ -55,6 +59,8 @@ export type Database = {
           temperature_range?: string | null;
           care_tip?: string | null;
           photo_url?: string | null;
+          health_issues?: string[] | null;
+          health_remedies?: string[] | null;
         };
         Relationships: [];
       };
@@ -101,6 +107,64 @@ export type Database = {
           },
         ];
       };
+      plant_photos: {
+        Row: {
+          id: string;
+          plant_id: string;
+          user_id: string;
+          photo_url: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          plant_id: string;
+          user_id: string;
+          photo_url: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          plant_id?: string;
+          user_id?: string;
+          photo_url?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'plant_photos_plant_id_fkey';
+            columns: ['plant_id'];
+            referencedRelation: 'plants';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      journal_entries: {
+        Row: {
+          id: string;
+          plant_id: string | null;
+          user_id: string;
+          entry_type: 'added' | 'watered' | 'fertilized' | 'misted' | 'level_up' | 'health_issue' | 'note';
+          message: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          plant_id?: string | null;
+          user_id: string;
+          entry_type: 'added' | 'watered' | 'fertilized' | 'misted' | 'level_up' | 'health_issue' | 'note';
+          message: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          plant_id?: string | null;
+          user_id?: string;
+          entry_type?: 'added' | 'watered' | 'fertilized' | 'misted' | 'level_up' | 'health_issue' | 'note';
+          message?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       profiles: {
         Row: {
           id: string;
@@ -139,6 +203,13 @@ export type Database = {
 export type Plant = Database['public']['Tables']['plants']['Row'];
 export type CareTask = Database['public']['Tables']['care_tasks']['Row'];
 
+export type PlantPhoto = Database['public']['Tables']['plant_photos']['Row'];
+
 export type CareTaskWithPlant = CareTask & {
   plants: { id: string; name: string } | null;
+};
+
+export type JournalEntry = Database['public']['Tables']['journal_entries']['Row'];
+export type JournalEntryWithPlant = JournalEntry & {
+  plants: { id: string; name: string; photo_url: string | null } | null;
 };

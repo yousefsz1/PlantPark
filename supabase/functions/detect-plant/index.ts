@@ -5,7 +5,7 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const SYSTEM_PROMPT = `You are an expert botanist and plant care specialist. Identify the plant in the photo and return EXACTLY this JSON (no markdown, no code fences, raw JSON only):
+const SYSTEM_PROMPT = `You are an expert botanist and plant care specialist. Identify the plant in the photo, assess its visible health, and return EXACTLY this JSON (no markdown, no code fences, raw JSON only):
 
 {
   "name": "Common name of the plant",
@@ -17,13 +17,27 @@ const SYSTEM_PROMPT = `You are an expert botanist and plant care specialist. Ide
   "temperature": "Ideal range e.g. 65-80°F / 18-27°C",
   "careTip": "One actionable tip specific to this plant, max 100 chars",
   "fertilizingDays": <number — fertilizing interval in days>,
-  "mistingDays": <number or null — misting interval in days, null if not needed>
+  "mistingDays": <number or null — misting interval in days, null if not needed>,
+  "isHealthy": <boolean — true if plant looks healthy, false if visible problems detected>,
+  "healthScore": <integer 0-100 — your honest assessment of the plant's current visible health:
+    95-100 = perfect health, vibrant colour, no issues;
+    75-94 = mostly healthy, very minor cosmetic issues (tiny spots, one slightly yellow leaf);
+    50-74 = clearly visible stress — yellowing leaves, leaf curl, minor pests, wilting tips;
+    25-49 = significant problems affecting several leaves or growth points;
+    0-24 = severe decline, widespread damage, or near-dead.
+    Must be consistent: isHealthy true → healthScore ≥ 70; isHealthy false → healthScore < 70>,
+  "healthIssues": [<string> — list visible problems e.g. "Yellow leaves", "Brown leaf tips", "Signs of pests", "Wilting stems". Empty array [] if healthy.],
+  "remedies": [<string> — exactly 2-3 specific actionable home remedies or prevention tips, max 120 chars each]
 }
 
 Rules:
 - wateringFrequency: "daily" = every 1-3 days, "weekly" = every 4-14 days, "monthly" = 15+ days
 - wateringDays must match wateringFrequency (e.g. "weekly" with 7 days is valid)
 - sunlight: "low" = shade-tolerant, "medium" = indirect light, "bright" = direct/strong indirect
+- healthScore must reflect what you actually see in the photo — do not default to 100 if there are visible issues
+- If isHealthy is true: healthIssues must be [] and remedies should be 2-3 general prevention tips (e.g. "Wipe leaves monthly with a damp cloth to boost photosynthesis")
+- If isHealthy is false: healthIssues lists 1-3 visible problems; remedies must address each with a specific, practical home fix (e.g. "Add a pinch of Epsom salt to soil for magnesium boost", "Mix neem oil with water and spray weekly to eliminate pests", "Trim yellow leaves with clean scissors to redirect energy to healthy growth")
+- remedies must always have exactly 2-3 entries — never fewer, never more
 - Always return all fields. If unsure, make a best guess. Return ONLY JSON.`;
 
 serve(async (req: Request) => {
@@ -50,7 +64,7 @@ serve(async (req: Request) => {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 512,
+        max_tokens: 900,
         system: SYSTEM_PROMPT,
         messages: [
           {

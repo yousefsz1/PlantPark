@@ -31,6 +31,10 @@ interface DetectedPlant {
   careTip: string;
   fertilizingDays: number;
   mistingDays: number | null;
+  isHealthy: boolean;
+  healthScore: number;
+  healthIssues: string[];
+  remedies: string[];
 }
 
 const SUNLIGHT_LABELS: Record<string, string> = {
@@ -149,13 +153,27 @@ export default function AddPlantScreen() {
           soil_type: detected.soilType,
           temperature_range: detected.temperature,
           care_tip: detected.careTip,
-          health_percent: 100,
+          health_percent: Math.min(100, Math.max(0, Math.round(detected.healthScore ?? (detected.isHealthy ? 100 : 65)))),
           photo_url: photoUrl,
+          health_issues: detected.healthIssues.length > 0 ? detected.healthIssues : null,
+          health_remedies: detected.remedies.length > 0 ? detected.remedies : null,
         })
         .select('id')
         .single();
 
       if (plantErr || !plant) throw new Error(plantErr?.message ?? 'Failed to save plant');
+
+      // Journal entries (fire-and-forget)
+      const journalRows: { plant_id: string; user_id: string; entry_type: string; message: string }[] = [
+        { plant_id: plant.id, user_id: user.id, entry_type: 'added', message: `Added ${detected.name} to your garden` },
+      ];
+      if (detected.healthIssues.length > 0) {
+        journalRows.push({
+          plant_id: plant.id, user_id: user.id, entry_type: 'health_issue',
+          message: `${detected.name} showing ${detected.healthIssues[0].toLowerCase()} — check Health Tips`,
+        });
+      }
+      supabase.from('journal_entries').insert(journalRows).then(null, () => {});
 
       const taskInserts = [
         { plant_id: plant.id, user_id: user.id, task_type: 'watering' as const,    due_date: addDaysToToday(wDays), xp_reward: 10, interval_days: wDays },
@@ -165,12 +183,14 @@ export default function AddPlantScreen() {
           : []),
       ];
 
-      await supabase.from('care_tasks').insert(taskInserts);
+      const { error: taskErr } = await supabase.from('care_tasks').insert(taskInserts);
+      if (taskErr) throw new Error(`care_tasks: ${taskErr.message}`);
 
       const hasPermission = await requestNotificationPermission();
       if (hasPermission) {
         for (const t of taskInserts) {
-          scheduleTaskNotification(detected.name, t.task_type, t.due_date).catch(() => {});
+          if (t.task_type !== 'watering') continue;
+          scheduleTaskNotification(detected.name, t.task_type, t.due_date, plant.id).catch(() => {});
         }
       }
 
@@ -236,6 +256,36 @@ export default function AddPlantScreen() {
               <Text style={styles.careTipLabel}>Care Tip</Text>
               <Text style={styles.careTipText}>{detected.careTip}</Text>
             </View>
+
+            {detected.remedies.length > 0 && (
+              <View style={[styles.healthBox, !detected.isHealthy && styles.healthBoxWarning]}>
+                <View style={styles.healthBoxLabelRow}>
+                  <Ionicons
+                    name={detected.isHealthy ? 'checkmark-circle' : 'warning'}
+                    size={13}
+                    color={detected.isHealthy ? Colors.primary : Colors.warning}
+                  />
+                  <Text style={[styles.healthBoxLabel, !detected.isHealthy && styles.healthBoxLabelWarning]}>
+                    {detected.isHealthy ? 'Prevention Tips' : 'Health Issues Detected'}
+                  </Text>
+                </View>
+                {!detected.isHealthy && detected.healthIssues.length > 0 && (
+                  <View style={styles.issuesList}>
+                    {detected.healthIssues.map((issue, i) => (
+                      <Text key={i} style={styles.issueItem}>• {issue}</Text>
+                    ))}
+                  </View>
+                )}
+                <View style={styles.remediesList}>
+                  {detected.remedies.map((remedy, i) => (
+                    <View key={i} style={styles.remedyRow}>
+                      <Text style={styles.remedyNum}>{i + 1}</Text>
+                      <Text style={styles.remedyText}>{remedy}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
 
             {saveError ? <Text style={styles.errorText}>{saveError}</Text> : null}
 
@@ -379,6 +429,47 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   careTipText: { fontSize: FontSize.sm, color: Colors.textPrimary, lineHeight: 20 },
+
+  // Health tips / troubleshooting box
+  healthBox: {
+    backgroundColor: 'rgba(46,204,113,0.07)',
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    padding: Spacing.md,
+    gap: Spacing.sm,
+  },
+  healthBoxWarning: {
+    backgroundColor: 'rgba(243,156,18,0.08)',
+    borderColor: Colors.warning,
+  },
+  healthBoxLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  healthBoxLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  healthBoxLabelWarning: { color: Colors.warning },
+  issuesList: { gap: 3 },
+  issueItem: { fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 19 },
+  remediesList: { gap: Spacing.sm, marginTop: 2 },
+  remedyRow: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'flex-start' },
+  remedyNum: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: Colors.primaryDark,
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    textAlign: 'center',
+    lineHeight: 20,
+    flexShrink: 0,
+  },
+  remedyText: { flex: 1, fontSize: FontSize.sm, color: Colors.textPrimary, lineHeight: 20 },
+
   saveBtn: {
     flexDirection: 'row',
     alignItems: 'center',

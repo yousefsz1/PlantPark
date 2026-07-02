@@ -1,10 +1,9 @@
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
-const TASK_LABELS: Record<string, string> = {
-  watering:    'needs watering 💧',
-  fertilizing: 'needs fertilizing 🌱',
-  misting:     'needs misting 🌿',
+const WATERING_CONTENT = {
+  title: 'Time to Water!',
+  body:  (name: string) => `${name} is thirsty — water it for +10 XP`,
 };
 
 export async function requestNotificationPermission(): Promise<boolean> {
@@ -23,28 +22,58 @@ export async function scheduleTaskNotification(
   plantName: string,
   taskType: string,
   dueDateStr: string,
+  plantId?: string,
 ): Promise<string | null> {
-  if (Platform.OS === 'web') return null;
+  if (Platform.OS === 'web' || taskType !== 'watering') return null;
   try {
-    // Fire at 9 AM on the due date
-    const triggerDate = new Date(`${dueDateStr}T09:00:00`);
-    if (triggerDate <= new Date()) return null;
-
+    // ⚠️ TEST MODE — fires 90 s from now instead of at 9 AM on due date.
+    // Revert to the DATE trigger block below before shipping.
     const id = await Notifications.scheduleNotificationAsync({
       content: {
-        title: 'PlantPal Care Reminder',
-        body:  `${plantName} ${TASK_LABELS[taskType] ?? 'needs attention'}`,
+        title: WATERING_CONTENT.title,
+        body:  WATERING_CONTENT.body(plantName),
         sound: true,
+        data: plantId ? { plantId } : undefined,
       },
       trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: triggerDate,
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: 90,
+        repeats: false,
       },
     });
     return id;
+
+    // ── Production trigger (restore after testing) ──────────────────────────
+    // const triggerDate = new Date(`${dueDateStr}T09:00:00`);
+    // if (triggerDate <= new Date()) return null;
+    // const id = await Notifications.scheduleNotificationAsync({
+    //   content: {
+    //     title: WATERING_CONTENT.title,
+    //     body:  WATERING_CONTENT.body(plantName),
+    //     sound: true,
+    //     data: plantId ? { plantId } : undefined,
+    //   },
+    //   trigger: {
+    //     type: Notifications.SchedulableTriggerInputTypes.DATE,
+    //     date: triggerDate,
+    //   },
+    // });
+    // return id;
   } catch {
     return null;
   }
+}
+
+export async function cancelPlantNotifications(plantId: string): Promise<void> {
+  if (Platform.OS === 'web') return;
+  try {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    await Promise.all(
+      scheduled
+        .filter(n => (n.content.data as { plantId?: string } | null)?.plantId === plantId)
+        .map(n => Notifications.cancelScheduledNotificationAsync(n.identifier)),
+    );
+  } catch {}
 }
 
 export async function cancelNotification(id: string): Promise<void> {
