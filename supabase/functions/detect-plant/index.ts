@@ -21,6 +21,9 @@ const SYSTEM_PROMPT = `You are an expert botanist and plant care specialist. Ide
   "careTip": "One actionable tip specific to this plant, max 100 chars",
   "fertilizingDays": <number — fertilizing interval in days>,
   "mistingDays": <number or null — misting interval in days, null if not needed>,
+  "toxicToHumans": <boolean — true if the plant is toxic/poisonous if ingested by humans>,
+  "toxicToPets": <boolean — true if toxic/poisonous to cats or dogs if ingested>,
+  "toxicityNote": <string or null — ONE short, simple sentence, max 100 chars, with an important safety note (e.g. symptoms, severity) if genuinely relevant. Null if non-toxic to both with nothing notable to add.>,
   "isHealthy": <boolean — true if plant looks healthy, false if visible problems detected>,
   "healthScore": <integer 0-100 — your honest assessment of the plant's current visible health:
     95-100 = perfect health, vibrant colour, no issues;
@@ -30,7 +33,8 @@ const SYSTEM_PROMPT = `You are an expert botanist and plant care specialist. Ide
     0-24 = severe decline, widespread damage, or near-dead.
     Must be consistent: isHealthy true → healthScore ≥ 70; isHealthy false → healthScore < 70>,
   "healthIssues": [<string> — list visible problems e.g. "Yellow leaves", "Brown leaf tips", "Signs of pests", "Wilting stems". Empty array [] if healthy.],
-  "remedies": [<string> — exactly 2-3 specific actionable home remedies or prevention tips, max 120 chars each]
+  "home_tips": [<string> — exactly 2-3 simple, everyday household remedies or prevention tips written for a total beginner, max 110 chars each, plain non-technical language (avoid jargon like "pH", "N-P-K", "nitrogen ratio"). Prefix each with ONE emoji from this fixed, well-supported set only: ☕ (coffee grounds) 🥛 (milk) 🥚 (eggshells) 🍌 (banana peel) 🧴 (spray/liquid application) 🌿 (cinnamon/general plant remedy) 💧 (water/misting) 🌞 (light/sunlight) 🪴 (general potting/soil tip). Never use any emoji outside this set. Omit the emoji prefix only if none of these fit (e.g. "Rotate pot weekly for even light exposure").],
+  "pro_tips": [<string> — exactly 1-2 more technical, horticultural remedies for an experienced grower, max 150 chars each, e.g. soil pH adjustment, drainage fixes, specific fertilizer N-P-K ratios. Plain text, no emoji prefix.]
 }
 
 Rules:
@@ -38,10 +42,96 @@ Rules:
 - wateringDays must match wateringFrequency (e.g. "weekly" with 7 days is valid)
 - sunlight: "low" = shade-tolerant, "medium" = indirect light, "bright" = direct/strong indirect
 - healthScore must reflect what you actually see in the photo — do not default to 100 if there are visible issues
-- If isHealthy is true: healthIssues must be [] and remedies should be 2-3 general prevention tips
-- If isHealthy is false: healthIssues lists 1-3 visible problems; remedies must address each with a specific, practical home fix
-- remedies must always have exactly 2-3 entries — never fewer, never more
+- If isHealthy is true: healthIssues must be [] and home_tips should be 2-3 general beginner-friendly prevention tips, pro_tips should be 1-2 general advanced-care tips
+- If isHealthy is false: healthIssues lists 1-3 visible problems; home_tips must address the visible issues with beginner-friendly fixes; pro_tips may offer more advanced, technical fixes for the same issues
+- home_tips must always have exactly 2-3 entries — never fewer, never more
+- pro_tips must always have exactly 1-2 entries — never fewer, never more
+- Prefer safe, verified household remedies in home_tips where appropriate, such as: diluted coffee grounds (nitrogen boost, acid-loving plants), baking soda + water spray (mild fungicide for leaf spot/powdery mildew, ~1 tsp per quart), cinnamon (natural antifungal for cuttings/soil), crushed eggshells (calcium boost, pest deterrent), diluted milk spray (1:10 ratio, mild fungicide for some leaf issues), banana peel steeped in water (potassium boost, steep 2-3 days)
+- NEVER suggest salt, vinegar, bleach, or any remedy harmful to plants or soil in either home_tips or pro_tips — always favor safe, plant-friendly ingredients and treatments
+- Both home_tips and pro_tips must be specific and actionable: include exact ratios, amounts, or frequency (e.g. "weekly", "1:10 ratio", "1 tsp per quart") — avoid vague advice like "apply occasionally". This is where pro_tips should give exact pH targets or fertilizer N-P-K ratios, not just general concepts.
+- Do not exceed the max character length for each field — keep every entry concise enough to fit the limit
+- Emoji prefixes in home_tips must come ONLY from the approved set listed above (☕ 🥛 🥚 🍌 🧴 🌿 💧 🌞 🪴) — never use any other emoji, even if it seems relevant, to avoid rendering issues on some devices
+- pro_tips must never include an emoji prefix — plain technical text only
+- Use real, well-established toxicity knowledge for common houseplants/garden plants (e.g. lilies toxic to cats, pothos toxic to both humans and pets, basil safe for both) — be accurate, not speculative
+- If you are not confident about a plant's toxicity, default toxicToHumans and toxicToPets to true (safer default) rather than guessing false
+- toxicityNote should only be non-null when there's a genuinely useful safety detail to add (e.g. "Causes vomiting and oral irritation if chewed by cats or dogs") — leave null for plants with no notable concern
 - Always return all fields. If unsure, make a best guess. Return ONLY JSON.`;
+
+async function fetchGeminiWithRetry(url: string, body: string, maxRetries = 2): Promise<Response> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    if (res.status !== 503 || attempt === maxRetries) return res;
+    await res.text().catch(() => {}); // drain the overloaded response before retrying
+    await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+  }
+  throw new Error('Unreachable');
+}
+
+const TOXICITY_SYSTEM_PROMPT = `You are a toxicology expert for plants. Given a plant's common name and species, independently assess its toxicity. Return EXACTLY this JSON (no markdown, no code fences, raw JSON only):
+
+{
+  "toxicToHumans": <boolean — true if the plant is toxic/poisonous if ingested by humans>,
+  "toxicToPets": <boolean — true if toxic/poisonous to cats or dogs if ingested>,
+  "toxicityNote": <string or null — ONE short, simple sentence, max 100 chars, with an important safety note (e.g. symptoms, severity) if genuinely relevant. Null if non-toxic to both with nothing notable to add.>
+}
+
+Rules:
+- Use real, well-established toxicity knowledge for common houseplants/garden plants — be accurate, not speculative
+- If you are not confident about a plant's toxicity, default toxicToHumans and toxicToPets to true (safer default) rather than guessing false
+- toxicityNote should only be non-null when there's a genuinely useful safety detail to add
+- Return ONLY JSON.`;
+
+type ToxicityCheck = { toxicToHumans: boolean; toxicToPets: boolean; toxicityNote: string | null };
+
+// Independent second opinion on toxicity via Claude Haiku — text-only (name/species),
+// runs after Gemini since it needs Gemini's identification as input. Never throws:
+// any failure (missing key, network error, timeout, bad JSON) resolves to null so the
+// scan always succeeds using Gemini's own toxicity fields as a fallback.
+async function fetchClaudeToxicityCheck(name: string, species: string): Promise<ToxicityCheck | null> {
+  try {
+    const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+    if (!apiKey) return null;
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 150,
+        system: TOXICITY_SYSTEM_PROMPT,
+        messages: [{
+          role: 'user',
+          content: `Plant name: ${name}\nSpecies: ${species}\n\nAssess its toxicity.`,
+        }],
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!res.ok) return null;
+
+    const result = await res.json();
+    const raw = result.content?.[0]?.text ?? '';
+    const jsonStr = raw.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim();
+    const parsed = JSON.parse(jsonStr);
+
+    if (typeof parsed.toxicToHumans !== 'boolean' || typeof parsed.toxicToPets !== 'boolean') return null;
+    return {
+      toxicToHumans: parsed.toxicToHumans,
+      toxicToPets: parsed.toxicToPets,
+      toxicityNote: typeof parsed.toxicityNote === 'string' ? parsed.toxicityNote : null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -60,30 +150,26 @@ serve(async (req: Request) => {
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
-    const geminiRes = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: {
-          parts: [{ text: SYSTEM_PROMPT }],
+    const geminiRes = await fetchGeminiWithRetry(url, JSON.stringify({
+      system_instruction: {
+        parts: [{ text: SYSTEM_PROMPT }],
+      },
+      contents: [
+        {
+          parts: [
+            { inline_data: { mime_type: type, data: image } },
+            { text: 'Identify this plant and return its care requirements as JSON.' },
+          ],
         },
-        contents: [
-          {
-            parts: [
-              { inline_data: { mime_type: type, data: image } },
-              { text: 'Identify this plant and return its care requirements as JSON.' },
-            ],
-          },
-        ],
-        generation_config: {
-          response_mime_type: 'application/json',
-          max_output_tokens: 2048,
-          // Disable thinking — not needed for structured JSON output and
-          // was consuming most of the token budget before the response began.
-          thinking_config: { thinking_budget: 0 },
-        },
-      }),
-    });
+      ],
+      generation_config: {
+        response_mime_type: 'application/json',
+        max_output_tokens: 2048,
+        // Disable thinking — not needed for structured JSON output and
+        // was consuming most of the token budget before the response began.
+        thinking_config: { thinking_budget: 0 },
+      },
+    }));
 
     if (!geminiRes.ok) {
       const err = await geminiRes.text();
@@ -100,6 +186,18 @@ serve(async (req: Request) => {
     // Strip any accidental markdown fences
     const jsonStr = raw.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim();
     const parsed = JSON.parse(jsonStr);
+
+    // Independent toxicity double-check via Claude Haiku — never fails the scan.
+    const claudeToxicity = await fetchClaudeToxicityCheck(parsed.name, parsed.species);
+    if (claudeToxicity) {
+      parsed.toxicToHumans = parsed.toxicToHumans || claudeToxicity.toxicToHumans;
+      parsed.toxicToPets   = parsed.toxicToPets   || claudeToxicity.toxicToPets;
+      if (parsed.toxicityNote && claudeToxicity.toxicityNote && parsed.toxicityNote !== claudeToxicity.toxicityNote) {
+        parsed.toxicityNote = `${parsed.toxicityNote} ${claudeToxicity.toxicityNote}`;
+      } else {
+        parsed.toxicityNote = parsed.toxicityNote ?? claudeToxicity.toxicityNote;
+      }
+    }
 
     return new Response(JSON.stringify(parsed), {
       headers: { ...CORS, 'Content-Type': 'application/json' },

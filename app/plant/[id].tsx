@@ -422,6 +422,36 @@ export default function PlantDetailScreen() {
           </View>
         </View>
 
+        {/* ── Toxicity ── */}
+        {plant.toxic_to_humans !== null && plant.toxic_to_pets !== null && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Toxicity</Text>
+            <View style={styles.toxicityRow}>
+              <View style={[styles.toxicityCard, plant.toxic_to_humans ? styles.toxicityCardToxic : styles.toxicityCardSafe]}>
+                <View style={styles.toxicityLabelRow}>
+                  <Ionicons name="body-outline" size={14} color={Colors.textMuted} />
+                  <Text style={styles.toxicityLabel}>Humans</Text>
+                </View>
+                <Text style={[styles.toxicityValue, { color: plant.toxic_to_humans ? Colors.danger : Colors.primary }]}>
+                  {plant.toxic_to_humans ? 'Toxic' : 'Non-Toxic'}
+                </Text>
+              </View>
+              <View style={[styles.toxicityCard, plant.toxic_to_pets ? styles.toxicityCardToxic : styles.toxicityCardSafe]}>
+                <View style={styles.toxicityLabelRow}>
+                  <Ionicons name="paw" size={14} color={Colors.textMuted} />
+                  <Text style={styles.toxicityLabel}>Pets</Text>
+                </View>
+                <Text style={[styles.toxicityValue, { color: plant.toxic_to_pets ? Colors.danger : Colors.primary }]}>
+                  {plant.toxic_to_pets ? 'Toxic' : 'Non-Toxic'}
+                </Text>
+              </View>
+            </View>
+            {plant.toxicity_note && (
+              <Text style={styles.toxicityNote}>{plant.toxicity_note}</Text>
+            )}
+          </View>
+        )}
+
         {/* ── Care requirements ── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Care Requirements</Text>
@@ -449,6 +479,7 @@ export default function PlantDetailScreen() {
         {/* ── Health tips & troubleshooting ── */}
         {plant.health_remedies && plant.health_remedies.length > 0 ? (() => {
           const hasIssues = (plant.health_issues?.length ?? 0) > 0;
+          const hasProTips = (plant.health_tips_pro?.length ?? 0) > 0;
           return (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Health Tips & Troubleshooting</Text>
@@ -480,16 +511,33 @@ export default function PlantDetailScreen() {
                   </View>
                 )}
 
+                <Text style={styles.subLabel}>🏠 Home Remedies</Text>
                 <View style={styles.remediesList}>
                   {plant.health_remedies!.map((remedy, i) => (
                     <View key={i} style={[styles.remedyRow, hasIssues && styles.remedyRowWarning]}>
                       <View style={[styles.remedyBadge, hasIssues && styles.remedyBadgeWarning]}>
                         <Text style={styles.remedyBadgeText}>{i + 1}</Text>
                       </View>
-                      <Text style={styles.remedyText}>{remedy}</Text>
+                      <Text style={styles.remedyText}>{remedy.replace(/️/g, '')}</Text>
                     </View>
                   ))}
                 </View>
+
+                {hasProTips && (
+                  <View style={styles.proTipsSection}>
+                    <Text style={styles.subLabel}>🔬 Pro Tips</Text>
+                    <View style={styles.remediesList}>
+                      {plant.health_tips_pro!.map((tip, i) => (
+                        <View key={i} style={styles.remedyRow}>
+                          <View style={styles.remedyBadgePro}>
+                            <Text style={styles.remedyBadgeText}>{i + 1}</Text>
+                          </View>
+                          <Text style={styles.remedyText}>{tip.replace(/️/g, '')}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
               </View>
             </View>
           );
@@ -693,6 +741,23 @@ const styles = StyleSheet.create({
   },
   infoValue: { fontSize: FontSize.sm, color: Colors.textPrimary, fontWeight: '600' },
 
+  // Toxicity
+  toxicityRow: { flexDirection: 'row', gap: Spacing.sm },
+  toxicityCard: {
+    flex: 1,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    padding: Spacing.md,
+    alignItems: 'center',
+    gap: 4,
+  },
+  toxicityCardToxic: { backgroundColor: 'rgba(231,76,60,0.1)', borderColor: Colors.danger },
+  toxicityCardSafe: { backgroundColor: 'rgba(46,204,113,0.1)', borderColor: Colors.primary },
+  toxicityLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  toxicityLabel: { fontSize: FontSize.xs, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.6 },
+  toxicityValue: { fontSize: FontSize.sm, fontWeight: '700' },
+  toxicityNote: { fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 17, marginTop: Spacing.sm },
+
   // Care tip
   tipBox: {
     backgroundColor: 'rgba(46,204,113,0.1)',
@@ -763,8 +828,20 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   remedyBadgeWarning: { backgroundColor: Colors.warning },
+  remedyBadgePro: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Colors.rare,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+    marginTop: 1,
+  },
   remedyBadgeText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.background },
-  remedyText: { flex: 1, fontSize: FontSize.sm, color: Colors.textPrimary, lineHeight: 20 },
+  remedyText: { flex: 1, fontSize: FontSize.md, fontWeight: '600', color: Colors.textPrimary, lineHeight: 20 },
+  subLabel: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.textMuted, marginTop: Spacing.xs, textTransform: 'uppercase', letterSpacing: 0.6 },
+  proTipsSection: { gap: Spacing.sm, marginTop: 2 },
 
   // Watering
   waterCard: {

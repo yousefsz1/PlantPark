@@ -6,10 +6,14 @@ export type Level = {
 };
 
 export const LEVELS: Level[] = [
-  { name: 'Seedling',        emoji: '🌱', minXP: 0,   maxXP: 100  },
-  { name: 'Sprout',          emoji: '🌿', minXP: 101, maxXP: 300  },
-  { name: 'Gardener',        emoji: '🌳', minXP: 301, maxXP: 700  },
-  { name: 'Master Gardener', emoji: '🏆', minXP: 701, maxXP: Infinity },
+  { name: 'Seedling',        emoji: '🌱', minXP: 0,    maxXP: 99   },
+  { name: 'Sprout',          emoji: '🌿', minXP: 100,  maxXP: 299  },
+  { name: 'Grower',          emoji: '🪴', minXP: 300,  maxXP: 599  },
+  { name: 'Budding Gardener', emoji: '🌷', minXP: 600,  maxXP: 999  },
+  { name: 'Green Thumb',     emoji: '🌳', minXP: 1000, maxXP: 1499 },
+  { name: 'Bloom Keeper',    emoji: '🌸', minXP: 1500, maxXP: 2099 },
+  { name: 'Garden Sage',     emoji: '🧙', minXP: 2100, maxXP: 2799 },
+  { name: 'Master Gardener', emoji: '🏆', minXP: 2800, maxXP: Infinity },
 ];
 
 export function getLevel(totalXP: number): Level {

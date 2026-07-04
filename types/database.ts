@@ -21,6 +21,10 @@ export type Database = {
           photo_url: string | null;
           health_issues: string[] | null;
           health_remedies: string[] | null;
+          health_tips_pro: string[] | null;
+          toxic_to_humans: boolean | null;
+          toxic_to_pets: boolean | null;
+          toxicity_note: string | null;
         };
         Insert: {
           id?: string;
@@ -41,6 +45,10 @@ export type Database = {
           photo_url?: string | null;
           health_issues?: string[] | null;
           health_remedies?: string[] | null;
+          health_tips_pro?: string[] | null;
+          toxic_to_humans?: boolean | null;
+          toxic_to_pets?: boolean | null;
+          toxicity_note?: string | null;
         };
         Update: {
           id?: string;
@@ -61,6 +69,70 @@ export type Database = {
           photo_url?: string | null;
           health_issues?: string[] | null;
           health_remedies?: string[] | null;
+          health_tips_pro?: string[] | null;
+          toxic_to_humans?: boolean | null;
+          toxic_to_pets?: boolean | null;
+          toxicity_note?: string | null;
+        };
+        Relationships: [];
+      };
+      favourites: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          species: string | null;
+          photo_url: string | null;
+          watering_frequency: string | null;
+          sunlight: string | null;
+          soil_type: string | null;
+          temperature: string | null;
+          care_tip: string | null;
+          health_issues: string[] | null;
+          health_remedies: string[] | null;
+          health_tips_pro: string[] | null;
+          toxic_to_humans: boolean | null;
+          toxic_to_pets: boolean | null;
+          toxicity_note: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          name: string;
+          species?: string | null;
+          photo_url?: string | null;
+          watering_frequency?: string | null;
+          sunlight?: string | null;
+          soil_type?: string | null;
+          temperature?: string | null;
+          care_tip?: string | null;
+          health_issues?: string[] | null;
+          health_remedies?: string[] | null;
+          health_tips_pro?: string[] | null;
+          toxic_to_humans?: boolean | null;
+          toxic_to_pets?: boolean | null;
+          toxicity_note?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          name?: string;
+          species?: string | null;
+          photo_url?: string | null;
+          watering_frequency?: string | null;
+          sunlight?: string | null;
+          soil_type?: string | null;
+          temperature?: string | null;
+          care_tip?: string | null;
+          health_issues?: string[] | null;
+          health_remedies?: string[] | null;
+          health_tips_pro?: string[] | null;
+          toxic_to_humans?: boolean | null;
+          toxic_to_pets?: boolean | null;
+          toxicity_note?: string | null;
+          created_at?: string;
         };
         Relationships: [];
       };
@@ -202,6 +274,7 @@ export type Database = {
 
 export type Plant = Database['public']['Tables']['plants']['Row'];
 export type CareTask = Database['public']['Tables']['care_tasks']['Row'];
+export type Favourite = Database['public']['Tables']['favourites']['Row'];
 
 export type PlantPhoto = Database['public']['Tables']['plant_photos']['Row'];
 

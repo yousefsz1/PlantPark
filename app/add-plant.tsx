@@ -31,10 +31,14 @@ interface DetectedPlant {
   careTip: string;
   fertilizingDays: number;
   mistingDays: number | null;
+  toxicToHumans: boolean;
+  toxicToPets: boolean;
+  toxicityNote: string | null;
   isHealthy: boolean;
   healthScore: number;
   healthIssues: string[];
-  remedies: string[];
+  home_tips: string[];
+  pro_tips: string[];
 }
 
 const SUNLIGHT_LABELS: Record<string, string> = {
@@ -58,12 +62,17 @@ export default function AddPlantScreen() {
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [favourited, setFavourited] = useState(false);
+  const [favouriting, setFavouriting] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const runAnalysis = useCallback(async (uri: string) => {
     setPhotoUri(uri);
     setPhase('analyzing');
     setAnalyzeError(null);
     setCompressed(null);
+    setFavourited(false);
+    setToastMessage(null);
     try {
       // Compress: resize to max 1024px wide, 80% JPEG — brings 5-8 MB down to ~200-500 KB
       const result = await ImageManipulator.manipulateAsync(
@@ -156,7 +165,11 @@ export default function AddPlantScreen() {
           health_percent: Math.min(100, Math.max(0, Math.round(detected.healthScore ?? (detected.isHealthy ? 100 : 65)))),
           photo_url: photoUrl,
           health_issues: detected.healthIssues.length > 0 ? detected.healthIssues : null,
-          health_remedies: detected.remedies.length > 0 ? detected.remedies : null,
+          health_remedies: detected.home_tips.length > 0 ? detected.home_tips : null,
+          health_tips_pro: detected.pro_tips.length > 0 ? detected.pro_tips : null,
+          toxic_to_humans: detected.toxicToHumans,
+          toxic_to_pets: detected.toxicToPets,
+          toxicity_note: detected.toxicityNote,
         })
         .select('id')
         .single();
@@ -204,6 +217,83 @@ export default function AddPlantScreen() {
     }
   }, [detected, router]);
 
+  const handleAddFavourite = useCallback(async () => {
+    if (!detected || favourited || favouriting) return;
+    setFavouriting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const species = detected.species?.trim();
+      const nameMatch = detected.name.trim();
+
+      // Check if this species (or name, if species is unknown) is already
+      // discovered anywhere for this user — either an actual garden plant or
+      // a prior favourite — to decide whether the XP bonus applies.
+      const [plantsRes, favouritesRes] = await Promise.all([
+        species
+          ? supabase.from('plants').select('id', { count: 'exact', head: true }).eq('user_id', user.id).ilike('species', species)
+          : supabase.from('plants').select('id', { count: 'exact', head: true }).eq('user_id', user.id).ilike('name', nameMatch),
+        species
+          ? supabase.from('favourites').select('id', { count: 'exact', head: true }).eq('user_id', user.id).ilike('species', species)
+          : supabase.from('favourites').select('id', { count: 'exact', head: true }).eq('user_id', user.id).ilike('name', nameMatch),
+      ]);
+      const isNewSpecies = (plantsRes.count ?? 0) === 0 && (favouritesRes.count ?? 0) === 0;
+
+      // Upload compressed photo to Supabase Storage (non-fatal if it fails)
+      let photoUrl: string | null = null;
+      if (compressed?.base64) {
+        try {
+          const bytes = Uint8Array.from(atob(compressed.base64), c => c.charCodeAt(0));
+          const storagePath = `${user.id}/${Date.now()}-fav.jpg`;
+          const { data: up, error: upErr } = await supabase.storage
+            .from('plant-images')
+            .upload(storagePath, bytes, { contentType: 'image/jpeg', upsert: false });
+          if (!upErr && up) {
+            const { data: urlData } = supabase.storage.from('plant-images').getPublicUrl(up.path);
+            photoUrl = urlData.publicUrl;
+          }
+        } catch {
+          // Upload failed — favourite saved without photo
+        }
+      }
+
+      const { error: favErr } = await supabase.from('favourites').insert({
+        user_id: user.id,
+        name: detected.name,
+        species: detected.species,
+        photo_url: photoUrl,
+        watering_frequency: detected.wateringFrequency,
+        sunlight: detected.sunlight,
+        soil_type: detected.soilType,
+        temperature: detected.temperature,
+        care_tip: detected.careTip,
+        health_issues: detected.healthIssues.length > 0 ? detected.healthIssues : null,
+        health_remedies: detected.home_tips.length > 0 ? detected.home_tips : null,
+        health_tips_pro: detected.pro_tips.length > 0 ? detected.pro_tips : null,
+        toxic_to_humans: detected.toxicToHumans,
+        toxic_to_pets: detected.toxicToPets,
+        toxicity_note: detected.toxicityNote,
+      });
+      if (favErr) throw new Error(favErr.message);
+
+      if (isNewSpecies) {
+        supabase.rpc('increment_xp', { xp_amount: 10 }).then(null, () => {});
+      }
+
+      setFavourited(true);
+      setToastMessage(isNewSpecies ? 'Added to Favourites  +10 XP' : 'Added to Favourites');
+      setTimeout(() => setToastMessage(null), 2200);
+    } catch (err) {
+      Alert.alert(
+        'Could not add favourite',
+        err instanceof Error ? err.message : 'Please try again.',
+      );
+    } finally {
+      setFavouriting(false);
+    }
+  }, [detected, compressed, favourited, favouriting]);
+
   // ── Analyzing ────────────────────────────────────────────────────────────────
   if (phase === 'analyzing') {
     return (
@@ -236,8 +326,33 @@ export default function AddPlantScreen() {
       <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
         <ScrollView contentContainerStyle={styles.reviewScroll} showsVerticalScrollIndicator={false}>
           {photoUri && (
-            <Image source={{ uri: photoUri }} style={styles.reviewImage} resizeMode="cover" />
+            <View style={styles.reviewImageWrap}>
+              <Image source={{ uri: photoUri }} style={styles.reviewImage} resizeMode="cover" />
+              <TouchableOpacity
+                style={styles.favouriteBtn}
+                onPress={handleAddFavourite}
+                disabled={favouriting || favourited}
+                activeOpacity={0.8}
+              >
+                {favouriting ? (
+                  <ActivityIndicator size="small" color={Colors.danger} />
+                ) : (
+                  <Ionicons
+                    name={favourited ? 'heart' : 'heart-outline'}
+                    size={20}
+                    color={favourited ? Colors.danger : '#FFFFFF'}
+                  />
+                )}
+              </TouchableOpacity>
+            </View>
           )}
+
+          {toastMessage ? (
+            <View style={styles.toast}>
+              <Ionicons name="checkmark-circle" size={15} color={Colors.primary} />
+              <Text style={styles.toastText}>{toastMessage}</Text>
+            </View>
+          ) : null}
 
           <View style={styles.reviewCard}>
             <Text style={styles.reviewName}>{detected.name}</Text>
@@ -253,12 +368,36 @@ export default function AddPlantScreen() {
               ))}
             </View>
 
+            <View style={styles.toxicityRow}>
+              <View style={[styles.toxicityCard, detected.toxicToHumans ? styles.toxicityCardToxic : styles.toxicityCardSafe]}>
+                <View style={styles.toxicityLabelRow}>
+                  <Ionicons name="body-outline" size={14} color={Colors.textMuted} />
+                  <Text style={styles.toxicityLabel}>Humans</Text>
+                </View>
+                <Text style={[styles.toxicityValue, { color: detected.toxicToHumans ? Colors.danger : Colors.primary }]}>
+                  {detected.toxicToHumans ? 'Toxic' : 'Non-Toxic'}
+                </Text>
+              </View>
+              <View style={[styles.toxicityCard, detected.toxicToPets ? styles.toxicityCardToxic : styles.toxicityCardSafe]}>
+                <View style={styles.toxicityLabelRow}>
+                  <Ionicons name="paw" size={14} color={Colors.textMuted} />
+                  <Text style={styles.toxicityLabel}>Pets</Text>
+                </View>
+                <Text style={[styles.toxicityValue, { color: detected.toxicToPets ? Colors.danger : Colors.primary }]}>
+                  {detected.toxicToPets ? 'Toxic' : 'Non-Toxic'}
+                </Text>
+              </View>
+            </View>
+            {detected.toxicityNote && (
+              <Text style={styles.toxicityNote}>{detected.toxicityNote}</Text>
+            )}
+
             <View style={styles.careTipBox}>
               <Text style={styles.careTipLabel}>Care Tip</Text>
               <Text style={styles.careTipText}>{detected.careTip}</Text>
             </View>
 
-            {detected.remedies.length > 0 && (
+            {(detected.home_tips.length > 0 || detected.pro_tips.length > 0) && (
               <View style={[styles.healthBox, !detected.isHealthy && styles.healthBoxWarning]}>
                 <View style={styles.healthBoxLabelRow}>
                   <Ionicons
@@ -277,14 +416,32 @@ export default function AddPlantScreen() {
                     ))}
                   </View>
                 )}
-                <View style={styles.remediesList}>
-                  {detected.remedies.map((remedy, i) => (
-                    <View key={i} style={styles.remedyRow}>
-                      <Text style={styles.remedyNum}>{i + 1}</Text>
-                      <Text style={styles.remedyText}>{remedy}</Text>
+                {detected.home_tips.length > 0 && (
+                  <>
+                    <Text style={styles.subLabel}>🏠 Home Remedies</Text>
+                    <View style={styles.remediesList}>
+                      {detected.home_tips.map((remedy, i) => (
+                        <View key={i} style={styles.remedyRow}>
+                          <Text style={styles.remedyNum}>{i + 1}</Text>
+                          <Text style={styles.remedyText}>{remedy}</Text>
+                        </View>
+                      ))}
                     </View>
-                  ))}
-                </View>
+                  </>
+                )}
+                {detected.pro_tips.length > 0 && (
+                  <View style={styles.proTipsSection}>
+                    <Text style={styles.subLabel}>🔬 Pro Tips</Text>
+                    <View style={styles.remediesList}>
+                      {detected.pro_tips.map((tip, i) => (
+                        <View key={i} style={styles.remedyRow}>
+                          <Text style={styles.proTipNum}>{i + 1}</Text>
+                          <Text style={styles.remedyText}>{tip}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
               </View>
             )}
 
@@ -381,7 +538,35 @@ const styles = StyleSheet.create({
 
   // Review
   reviewScroll: { paddingBottom: Spacing.xxl },
+  reviewImageWrap: { position: 'relative' },
   reviewImage: { width: '100%', height: 260 },
+  favouriteBtn: {
+    position: 'absolute',
+    top: Spacing.sm,
+    left: Spacing.sm,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  toast: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 6,
+    backgroundColor: Colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.full,
+    marginTop: Spacing.sm,
+  },
+  toastText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.textPrimary },
   reviewCard: {
     margin: Spacing.md,
     backgroundColor: Colors.card,
@@ -414,6 +599,21 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   infoValue: { fontSize: FontSize.sm, color: Colors.textPrimary, fontWeight: '600' },
+  toxicityRow: { flexDirection: 'row', gap: Spacing.sm },
+  toxicityCard: {
+    flex: 1,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    padding: Spacing.md,
+    alignItems: 'center',
+    gap: 4,
+  },
+  toxicityCardToxic: { backgroundColor: 'rgba(231,76,60,0.1)', borderColor: Colors.danger },
+  toxicityCardSafe: { backgroundColor: 'rgba(46,204,113,0.1)', borderColor: Colors.primary },
+  toxicityLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  toxicityLabel: { fontSize: FontSize.xs, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.6 },
+  toxicityValue: { fontSize: FontSize.sm, fontWeight: '700' },
+  toxicityNote: { fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 17, marginTop: -Spacing.xs },
   careTipBox: {
     backgroundColor: 'rgba(46,204,113,0.1)',
     borderRadius: Radius.md,
@@ -470,6 +670,20 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   remedyText: { flex: 1, fontSize: FontSize.sm, color: Colors.textPrimary, lineHeight: 20 },
+  subLabel: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.textSecondary, marginTop: 2 },
+  proTipsSection: { gap: Spacing.sm, marginTop: 2 },
+  proTipNum: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: Colors.rare,
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    textAlign: 'center',
+    lineHeight: 20,
+    flexShrink: 0,
+  },
 
   saveBtn: {
     flexDirection: 'row',

@@ -55,11 +55,15 @@ function getMood(health: number): { icon: 'happy' | 'remove-circle-outline' | 's
   return               { icon: 'sad-outline',               color: Colors.danger  };
 }
 
-const LEVEL_ICONS: Record<string, 'leaf-outline' | 'leaf' | 'trophy'> = {
-  'Seedling':        'leaf-outline',
-  'Sprout':          'leaf',
-  'Gardener':        'leaf',
-  'Master Gardener': 'trophy',
+const LEVEL_ICONS: Record<string, 'leaf-outline' | 'leaf' | 'flower-outline' | 'flower' | 'star-outline' | 'star' | 'ribbon' | 'trophy'> = {
+  'Seedling':         'leaf-outline',
+  'Sprout':           'leaf',
+  'Grower':           'flower-outline',
+  'Budding Gardener': 'flower',
+  'Green Thumb':      'star-outline',
+  'Bloom Keeper':     'star',
+  'Garden Sage':      'ribbon',
+  'Master Gardener':  'trophy',
 };
 
 function extractStoragePath(publicUrl: string): string | null {
@@ -386,8 +390,19 @@ export default function GardenScreen() {
       }
 
       await fetchData();
-    } catch {
-      // silently ignore — list refreshes on next focus
+    } catch (err) {
+      const e = err as Record<string, unknown>;
+      console.error('handleCompleteTask error:', {
+        message: e?.message,
+        code:    e?.code,
+        details: e?.details,
+        hint:    e?.hint,
+      });
+      const msg =
+        typeof e?.message === 'string' && e.message
+          ? e.message
+          : JSON.stringify(err);
+      Alert.alert('Could not complete task', msg);
     } finally {
       setCompletingTask(null);
     }
@@ -473,9 +488,6 @@ export default function GardenScreen() {
             </View>
             <Text style={styles.title}>{displayName || 'there'}</Text>
           </View>
-          <TouchableOpacity style={styles.addBtn} onPress={openAddPlant}>
-            <Ionicons name="add" size={24} color={Colors.textPrimary} />
-          </TouchableOpacity>
         </View>
 
         {/* Level bar */}
@@ -566,14 +578,6 @@ const styles = StyleSheet.create({
   greetingRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 2 },
   greeting: { fontSize: FontSize.sm, color: Colors.textSecondary },
   title: { fontSize: FontSize.hero, fontWeight: '700', color: Colors.textPrimary },
-  addBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.surfaceElevated,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
 
   // Level bar
   levelBar: {

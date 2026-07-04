@@ -34,11 +34,15 @@ interface ScanResult {
   careTip: string;
   fertilizingDays: number;
   mistingDays: number | null;
+  toxicToHumans: boolean;
+  toxicToPets: boolean;
+  toxicityNote: string | null;
   // Health diagnosis
   isHealthy: boolean;
   healthScore: number;
   healthIssues: string[];
-  remedies: string[];
+  homeTips: string[];
+  proTips: string[];
 }
 
 type Phase = 'camera' | 'analyzing' | 'result';
@@ -77,6 +81,9 @@ export default function ScanScreen() {
   const [xpTotal, setXpTotal]           = useState<number | null>(null);
   const [saved, setSaved]               = useState(false);
   const [saving, setSaving]             = useState(false);
+  const [favourited, setFavourited]     = useState(false);
+  const [favouriting, setFavouriting]   = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const runAnalysis = useCallback(async (uri: string) => {
     setPhotoUri(uri);
@@ -110,7 +117,9 @@ export default function ScanScreen() {
         sunlight: 'low' | 'medium' | 'bright'; soilType: string;
         temperature: string; careTip: string;
         fertilizingDays: number; mistingDays: number | null;
-        isHealthy: boolean; healthScore: number; healthIssues: string[]; remedies: string[];
+        toxicToHumans: boolean; toxicToPets: boolean; toxicityNote: string | null;
+        isHealthy: boolean; healthScore: number; healthIssues: string[];
+        home_tips: string[]; pro_tips: string[];
       };
 
       setResult({
@@ -125,10 +134,14 @@ export default function ScanScreen() {
         careTip: d.careTip,
         fertilizingDays: d.fertilizingDays,
         mistingDays: d.mistingDays,
+        toxicToHumans: d.toxicToHumans,
+        toxicToPets: d.toxicToPets,
+        toxicityNote: d.toxicityNote ?? null,
         isHealthy: d.isHealthy,
         healthScore: d.healthScore ?? (d.isHealthy ? 100 : 65),
         healthIssues: d.healthIssues ?? [],
-        remedies: d.remedies ?? [],
+        homeTips: d.home_tips ?? [],
+        proTips: d.pro_tips ?? [],
       });
       setPhase('result');
 
@@ -220,7 +233,11 @@ export default function ScanScreen() {
           health_percent: Math.min(100, Math.max(0, Math.round(result.healthScore))),
           photo_url: photoUrl,
           health_issues: result.healthIssues.length > 0 ? result.healthIssues : null,
-          health_remedies: result.remedies.length > 0 ? result.remedies : null,
+          health_remedies: result.homeTips.length > 0 ? result.homeTips : null,
+          health_tips_pro: result.proTips.length > 0 ? result.proTips : null,
+          toxic_to_humans: result.toxicToHumans,
+          toxic_to_pets: result.toxicToPets,
+          toxicity_note: result.toxicityNote,
         })
         .select('id')
         .single();
@@ -272,6 +289,83 @@ export default function ScanScreen() {
     }
   }, [result, photoBase64, router]);
 
+  const handleAddFavourite = useCallback(async () => {
+    if (!result || favourited || favouriting) return;
+    setFavouriting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const species = result.species?.trim();
+      const nameMatch = result.name.trim();
+
+      // Check if this species (or name, if species is unknown) is already
+      // discovered anywhere for this user — either an actual garden plant or
+      // a prior favourite — to decide whether the XP bonus applies.
+      const [plantsRes, favouritesRes] = await Promise.all([
+        species
+          ? supabase.from('plants').select('id', { count: 'exact', head: true }).eq('user_id', user.id).ilike('species', species)
+          : supabase.from('plants').select('id', { count: 'exact', head: true }).eq('user_id', user.id).ilike('name', nameMatch),
+        species
+          ? supabase.from('favourites').select('id', { count: 'exact', head: true }).eq('user_id', user.id).ilike('species', species)
+          : supabase.from('favourites').select('id', { count: 'exact', head: true }).eq('user_id', user.id).ilike('name', nameMatch),
+      ]);
+      const isNewSpecies = (plantsRes.count ?? 0) === 0 && (favouritesRes.count ?? 0) === 0;
+
+      // Upload compressed photo to Supabase Storage (non-fatal if it fails)
+      let photoUrl: string | null = null;
+      if (photoBase64) {
+        try {
+          const bytes = Uint8Array.from(atob(photoBase64), c => c.charCodeAt(0));
+          const storagePath = `${user.id}/${Date.now()}-fav.jpg`;
+          const { data: up, error: upErr } = await supabase.storage
+            .from('plant-images')
+            .upload(storagePath, bytes, { contentType: 'image/jpeg', upsert: false });
+          if (!upErr && up) {
+            const { data: urlData } = supabase.storage.from('plant-images').getPublicUrl(up.path);
+            photoUrl = urlData.publicUrl;
+          }
+        } catch {
+          // Upload failed — favourite saved without photo
+        }
+      }
+
+      const { error: favErr } = await supabase.from('favourites').insert({
+        user_id: user.id,
+        name: result.name,
+        species: result.species,
+        photo_url: photoUrl,
+        watering_frequency: result.wateringFrequency,
+        sunlight: result.sunlight,
+        soil_type: result.soilType,
+        temperature: result.temperature,
+        care_tip: result.careTip,
+        health_issues: result.healthIssues.length > 0 ? result.healthIssues : null,
+        health_remedies: result.homeTips.length > 0 ? result.homeTips : null,
+        health_tips_pro: result.proTips.length > 0 ? result.proTips : null,
+        toxic_to_humans: result.toxicToHumans,
+        toxic_to_pets: result.toxicToPets,
+        toxicity_note: result.toxicityNote,
+      });
+      if (favErr) throw new Error(favErr.message);
+
+      if (isNewSpecies) {
+        supabase.rpc('increment_xp', { xp_amount: 10 }).then(null, () => {});
+      }
+
+      setFavourited(true);
+      setToastMessage(isNewSpecies ? 'Added to Favourites  +10 XP' : 'Added to Favourites');
+      setTimeout(() => setToastMessage(null), 2200);
+    } catch (err) {
+      Alert.alert(
+        'Could not add favourite',
+        err instanceof Error ? err.message : 'Please try again.',
+      );
+    } finally {
+      setFavouriting(false);
+    }
+  }, [result, photoBase64, favourited, favouriting]);
+
   const resetScan = useCallback(() => {
     setPhase('camera');
     setPhotoUri(null);
@@ -280,6 +374,8 @@ export default function ScanScreen() {
     setAnalyzeError(null);
     setXpTotal(null);
     setSaved(false);
+    setFavourited(false);
+    setToastMessage(null);
   }, []);
 
   // ─── Permission loading ────────────────────────────────────────────────────
@@ -336,7 +432,7 @@ export default function ScanScreen() {
           contentContainerStyle={styles.resultContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* Photo + XP banner */}
+          {/* Photo + XP banner + favourite button */}
           <View style={styles.resultPhotoWrap}>
             {photoUri ? (
               <Image source={{ uri: photoUri }} style={styles.resultPhoto} resizeMode="cover" />
@@ -347,7 +443,30 @@ export default function ScanScreen() {
                 <Text style={styles.xpBannerText}>+30 XP earned!</Text>
               </View>
             ) : null}
+            <TouchableOpacity
+              style={styles.favouriteBtn}
+              onPress={handleAddFavourite}
+              disabled={favouriting || favourited}
+              activeOpacity={0.8}
+            >
+              {favouriting ? (
+                <ActivityIndicator size="small" color={Colors.danger} />
+              ) : (
+                <Ionicons
+                  name={favourited ? 'heart' : 'heart-outline'}
+                  size={20}
+                  color={favourited ? Colors.danger : '#FFFFFF'}
+                />
+              )}
+            </TouchableOpacity>
           </View>
+
+          {toastMessage ? (
+            <View style={styles.toast}>
+              <Ionicons name="checkmark-circle" size={15} color={Colors.primary} />
+              <Text style={styles.toastText}>{toastMessage}</Text>
+            </View>
+          ) : null}
 
           {/* Identity */}
           <View style={styles.identityCard}>
@@ -357,6 +476,34 @@ export default function ScanScreen() {
               <View style={[styles.statusDot, { backgroundColor: cfg.color }]} />
               <Text style={[styles.statusText, { color: cfg.color }]}>{cfg.label}</Text>
             </View>
+          </View>
+
+          {/* Toxicity */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Toxicity</Text>
+            <View style={styles.toxicityRow}>
+              <View style={[styles.toxicityCard, result.toxicToHumans ? styles.toxicityCardToxic : styles.toxicityCardSafe]}>
+                <View style={styles.toxicityLabelRow}>
+                  <Ionicons name="body-outline" size={14} color={Colors.textMuted} />
+                  <Text style={styles.toxicityLabel}>Humans</Text>
+                </View>
+                <Text style={[styles.toxicityValue, { color: result.toxicToHumans ? Colors.danger : Colors.primary }]}>
+                  {result.toxicToHumans ? 'Toxic' : 'Non-Toxic'}
+                </Text>
+              </View>
+              <View style={[styles.toxicityCard, result.toxicToPets ? styles.toxicityCardToxic : styles.toxicityCardSafe]}>
+                <View style={styles.toxicityLabelRow}>
+                  <Ionicons name="paw" size={14} color={Colors.textMuted} />
+                  <Text style={styles.toxicityLabel}>Pets</Text>
+                </View>
+                <Text style={[styles.toxicityValue, { color: result.toxicToPets ? Colors.danger : Colors.primary }]}>
+                  {result.toxicToPets ? 'Toxic' : 'Non-Toxic'}
+                </Text>
+              </View>
+            </View>
+            {result.toxicityNote && (
+              <Text style={styles.toxicityNote}>{result.toxicityNote}</Text>
+            )}
           </View>
 
           {/* Issues / health */}
@@ -381,20 +528,37 @@ export default function ScanScreen() {
             )}
           </View>
 
-          {/* Remedies / care tips */}
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>
-              {result.isHealthy ? 'Prevention Tips' : 'Home Remedies'}
-            </Text>
-            {result.remedies.map((step, i) => (
-              <View key={i} style={styles.fixRow}>
-                <View style={styles.fixNum}>
-                  <Text style={styles.fixNumText}>{i + 1}</Text>
+          {/* Home remedies */}
+          {result.homeTips.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>
+                {result.isHealthy ? '🏠 Prevention Tips' : '🏠 Home Remedies'}
+              </Text>
+              {result.homeTips.map((step, i) => (
+                <View key={i} style={styles.fixRow}>
+                  <View style={styles.fixNum}>
+                    <Text style={styles.fixNumText}>{i + 1}</Text>
+                  </View>
+                  <Text style={styles.fixText}>{step}</Text>
                 </View>
-                <Text style={styles.fixText}>{step}</Text>
-              </View>
-            ))}
-          </View>
+              ))}
+            </View>
+          )}
+
+          {/* Pro tips */}
+          {result.proTips.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>🔬 Pro Tips</Text>
+              {result.proTips.map((step, i) => (
+                <View key={i} style={styles.fixRow}>
+                  <View style={[styles.fixNum, styles.fixNumPro]}>
+                    <Text style={styles.fixNumText}>{i + 1}</Text>
+                  </View>
+                  <Text style={styles.fixText}>{step}</Text>
+                </View>
+              ))}
+            </View>
+          )}
 
           {/* Actions */}
           <TouchableOpacity
@@ -540,6 +704,33 @@ const styles = StyleSheet.create({
     borderColor: Colors.xp,
   },
   xpBannerText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.xp },
+  favouriteBtn: {
+    position: 'absolute',
+    top: Spacing.sm,
+    left: Spacing.sm,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  toast: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 6,
+    backgroundColor: Colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.full,
+    marginBottom: Spacing.md,
+  },
+  toastText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.textPrimary },
 
   identityCard: {
     backgroundColor: Colors.surface,
@@ -587,6 +778,22 @@ const styles = StyleSheet.create({
   listIcon: { marginTop: 1 },
   listText: { flex: 1, fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 20 },
 
+  toxicityRow: { flexDirection: 'row', gap: Spacing.sm },
+  toxicityCard: {
+    flex: 1,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    padding: Spacing.md,
+    alignItems: 'center',
+    gap: 4,
+  },
+  toxicityCardToxic: { backgroundColor: 'rgba(231,76,60,0.1)', borderColor: Colors.danger },
+  toxicityCardSafe: { backgroundColor: 'rgba(46,204,113,0.1)', borderColor: Colors.primary },
+  toxicityLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  toxicityLabel: { fontSize: FontSize.xs, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.6 },
+  toxicityValue: { fontSize: FontSize.sm, fontWeight: '700' },
+  toxicityNote: { fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 17, marginTop: Spacing.xs },
+
   fixRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
   fixNum: {
     width: 22,
@@ -598,6 +805,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     marginTop: 1,
   },
+  fixNumPro: { backgroundColor: Colors.rare },
   fixNumText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.background },
   fixText: { flex: 1, fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 20 },
 
