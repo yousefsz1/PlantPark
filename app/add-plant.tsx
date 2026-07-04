@@ -16,7 +16,9 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../lib/supabase';
 import { requestNotificationPermission, scheduleTaskNotification, cancelPlantNotifications } from '../lib/notifications';
-import { Colors, Spacing, Radius, FontSize } from '../constants/theme';
+import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../constants/theme';
+import { useTheme } from '../contexts/ThemeContext';
+import ToxicitySeverityBar from '../components/ToxicitySeverityBar';
 
 type Phase = 'capture' | 'analyzing' | 'review';
 
@@ -33,6 +35,8 @@ interface DetectedPlant {
   mistingDays: number | null;
   toxicToHumans: boolean;
   toxicToPets: boolean;
+  human_toxicity_severity: number;
+  pet_toxicity_severity: number;
   toxicityNote: string | null;
   isHealthy: boolean;
   healthScore: number;
@@ -54,6 +58,8 @@ function addDaysToToday(n: number): string {
 }
 
 export default function AddPlantScreen() {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>('capture');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -169,6 +175,8 @@ export default function AddPlantScreen() {
           health_tips_pro: detected.pro_tips.length > 0 ? detected.pro_tips : null,
           toxic_to_humans: detected.toxicToHumans,
           toxic_to_pets: detected.toxicToPets,
+          human_toxicity_severity: detected.human_toxicity_severity,
+          pet_toxicity_severity: detected.pet_toxicity_severity,
           toxicity_note: detected.toxicityNote,
         })
         .select('id')
@@ -273,6 +281,8 @@ export default function AddPlantScreen() {
         health_tips_pro: detected.pro_tips.length > 0 ? detected.pro_tips : null,
         toxic_to_humans: detected.toxicToHumans,
         toxic_to_pets: detected.toxicToPets,
+        human_toxicity_severity: detected.human_toxicity_severity,
+        pet_toxicity_severity: detected.pet_toxicity_severity,
         toxicity_note: detected.toxicityNote,
       });
       if (favErr) throw new Error(favErr.message);
@@ -369,24 +379,8 @@ export default function AddPlantScreen() {
             </View>
 
             <View style={styles.toxicityRow}>
-              <View style={[styles.toxicityCard, detected.toxicToHumans ? styles.toxicityCardToxic : styles.toxicityCardSafe]}>
-                <View style={styles.toxicityLabelRow}>
-                  <Ionicons name="body-outline" size={14} color={Colors.textMuted} />
-                  <Text style={styles.toxicityLabel}>Humans</Text>
-                </View>
-                <Text style={[styles.toxicityValue, { color: detected.toxicToHumans ? Colors.danger : Colors.primary }]}>
-                  {detected.toxicToHumans ? 'Toxic' : 'Non-Toxic'}
-                </Text>
-              </View>
-              <View style={[styles.toxicityCard, detected.toxicToPets ? styles.toxicityCardToxic : styles.toxicityCardSafe]}>
-                <View style={styles.toxicityLabelRow}>
-                  <Ionicons name="paw" size={14} color={Colors.textMuted} />
-                  <Text style={styles.toxicityLabel}>Pets</Text>
-                </View>
-                <Text style={[styles.toxicityValue, { color: detected.toxicToPets ? Colors.danger : Colors.primary }]}>
-                  {detected.toxicToPets ? 'Toxic' : 'Non-Toxic'}
-                </Text>
-              </View>
+              <ToxicitySeverityBar label="Humans" icon="body-outline" severity={detected.human_toxicity_severity ?? 0} />
+              <ToxicitySeverityBar label="Pets" icon="paw" severity={detected.pet_toxicity_severity ?? 0} />
             </View>
             {detected.toxicityNote && (
               <Text style={styles.toxicityNote}>{detected.toxicityNote}</Text>
@@ -508,7 +502,8 @@ export default function AddPlantScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
+  return StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background },
 
   // Analyzing
@@ -600,19 +595,6 @@ const styles = StyleSheet.create({
   },
   infoValue: { fontSize: FontSize.sm, color: Colors.textPrimary, fontWeight: '600' },
   toxicityRow: { flexDirection: 'row', gap: Spacing.sm },
-  toxicityCard: {
-    flex: 1,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    padding: Spacing.md,
-    alignItems: 'center',
-    gap: 4,
-  },
-  toxicityCardToxic: { backgroundColor: 'rgba(231,76,60,0.1)', borderColor: Colors.danger },
-  toxicityCardSafe: { backgroundColor: 'rgba(46,204,113,0.1)', borderColor: Colors.primary },
-  toxicityLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  toxicityLabel: { fontSize: FontSize.xs, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.6 },
-  toxicityValue: { fontSize: FontSize.sm, fontWeight: '700' },
   toxicityNote: { fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 17, marginTop: -Spacing.xs },
   careTipBox: {
     backgroundColor: 'rgba(46,204,113,0.1)',
@@ -771,4 +753,5 @@ const styles = StyleSheet.create({
   },
   photoBtnText: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.textPrimary },
   photoBtnTextOutline: { color: Colors.primary },
-});
+  });
+}

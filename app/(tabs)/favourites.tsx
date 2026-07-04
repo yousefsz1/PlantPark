@@ -15,12 +15,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import type { Favourite } from '../../types/database';
-import { Colors, Spacing, Radius, FontSize } from '../../constants/theme';
+import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
+import { useTheme } from '../../contexts/ThemeContext';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_SIZE = (SCREEN_WIDTH - Spacing.md * 2 - Spacing.sm) / 2;
 
 function FavouriteCard({ favourite, onPress }: { favourite: Favourite; onPress: () => void }) {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.82}>
       {favourite.photo_url ? (
@@ -41,6 +44,8 @@ function FavouriteCard({ favourite, onPress }: { favourite: Favourite; onPress: 
 }
 
 function EmptyFavourites({ onScan }: { onScan: () => void }) {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
   return (
     <View style={styles.emptyWrap}>
       <Ionicons name="heart-outline" size={48} color={Colors.textMuted} />
@@ -57,6 +62,8 @@ function EmptyFavourites({ onScan }: { onScan: () => void }) {
 }
 
 export default function FavouritesScreen() {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
   const router = useRouter();
   const [favourites, setFavourites] = useState<Favourite[]>([]);
   const [loading, setLoading] = useState(true);
@@ -127,7 +134,8 @@ export default function FavouritesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
+  return StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.background },
   header: { paddingHorizontal: Spacing.md, paddingTop: Spacing.sm, paddingBottom: Spacing.md },
   title: { fontSize: FontSize.hero, fontWeight: '700', color: Colors.textPrimary },
@@ -183,4 +191,5 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
   },
   scanBtnText: { fontSize: FontSize.md, fontWeight: '700', color: Colors.textPrimary },
-});
+  });
+}

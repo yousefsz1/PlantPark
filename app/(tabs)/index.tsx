@@ -19,7 +19,8 @@ import { supabase } from '../../lib/supabase';
 import { getLevel, xpToNextLevel } from '../../lib/levels';
 import { scheduleTaskNotification, cancelPlantNotifications } from '../../lib/notifications';
 import type { Plant, CareTaskWithPlant } from '../../types/database';
-import { Colors, Spacing, Radius, FontSize } from '../../constants/theme';
+import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
+import { useTheme } from '../../contexts/ThemeContext';
 
 const DELETE_ACTION_WIDTH = 80;
 
@@ -49,7 +50,7 @@ function greetingIcon(): 'sunny-outline' | 'partly-sunny-outline' | 'moon-outlin
   return 'moon-outline';
 }
 
-function getMood(health: number): { icon: 'happy' | 'remove-circle-outline' | 'sad-outline'; color: string } {
+function getMood(health: number, Colors: ColorPalette): { icon: 'happy' | 'remove-circle-outline' | 'sad-outline'; color: string } {
   if (health >= 80) return { icon: 'happy',                 color: Colors.primary };
   if (health >= 50) return { icon: 'remove-circle-outline', color: Colors.warning };
   return               { icon: 'sad-outline',               color: Colors.danger  };
@@ -87,6 +88,8 @@ const TASK_LABEL: Record<string, string> = {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function LevelBar({ totalXP }: { totalXP: number }) {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
   const level = getLevel(totalXP);
   const { pct, needed } = xpToNextLevel(totalXP);
   const isMax = needed === 0;
@@ -123,6 +126,8 @@ function SwipeablePlantCard({
   onPress: () => void;
   onDelete: () => void;
 }) {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
   const trans = useRef(new Animated.Value(0)).current;
   const openRef = useRef(false);
 
@@ -159,7 +164,7 @@ function SwipeablePlantCard({
   const today = todayISO();
   const overdueCount = pendingTasks.filter(t => t.plant_id === plant.id && t.due_date < today).length;
   const displayHealth = Math.max(0, plant.health_percent - overdueCount * 10);
-  const { icon: moodIcon, color } = getMood(displayHealth);
+  const { icon: moodIcon, color } = getMood(displayHealth, Colors);
 
   return (
     <View style={styles.swipeRow}>
@@ -231,6 +236,8 @@ function MissionCard({
   isCompleting: boolean;
   onComplete: () => void;
 }) {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
   const today = todayISO();
   const isOverdue = task.due_date < today;
 
@@ -265,6 +272,8 @@ function MissionCard({
 
 
 function EmptyGarden({ onAddFirst }: { onAddFirst: () => void }) {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
   return (
     <View style={styles.emptyContainer}>
       <Ionicons name="leaf-outline" size={72} color={Colors.textMuted} />
@@ -283,6 +292,8 @@ function EmptyGarden({ onAddFirst }: { onAddFirst: () => void }) {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function GardenScreen() {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
   const router = useRouter();
   const [plants, setPlants]             = useState<Plant[]>([]);
   const [pendingTasks, setPendingTasks] = useState<CareTaskWithPlant[]>([]);
@@ -562,7 +573,8 @@ export default function GardenScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
+  return StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.background },
   scroll: { flex: 1 },
   content: { padding: Spacing.md, paddingBottom: Spacing.xxl },
@@ -795,4 +807,5 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 8,
   },
-});
+  });
+}

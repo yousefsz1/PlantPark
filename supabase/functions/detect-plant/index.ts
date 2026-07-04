@@ -23,6 +23,8 @@ const SYSTEM_PROMPT = `You are an expert botanist and plant care specialist. Ide
   "mistingDays": <number or null — misting interval in days, null if not needed>,
   "toxicToHumans": <boolean — true if the plant is toxic/poisonous if ingested by humans>,
   "toxicToPets": <boolean — true if toxic/poisonous to cats or dogs if ingested>,
+  "humanSeverity": <integer 0-5 — severity of toxicity to humans: 0 = non-toxic, 1 = mild irritation, 2-3 = moderate GI/systemic symptoms, 4 = severe symptoms requiring medical attention, 5 = potentially fatal>,
+  "petSeverity": <integer 0-5 — severity of toxicity to cats/dogs, same scale: 0 = non-toxic, 1 = mild irritation, 2-3 = moderate GI/systemic symptoms, 4 = severe symptoms requiring vet attention, 5 = potentially fatal>,
   "toxicityNote": <string or null — ONE short, simple sentence, max 100 chars, with an important safety note (e.g. symptoms, severity) if genuinely relevant. Null if non-toxic to both with nothing notable to add.>,
   "isHealthy": <boolean — true if plant looks healthy, false if visible problems detected>,
   "healthScore": <integer 0-100 — your honest assessment of the plant's current visible health:
@@ -54,6 +56,7 @@ Rules:
 - pro_tips must never include an emoji prefix — plain technical text only
 - Use real, well-established toxicity knowledge for common houseplants/garden plants (e.g. lilies toxic to cats, pothos toxic to both humans and pets, basil safe for both) — be accurate, not speculative
 - If you are not confident about a plant's toxicity, default toxicToHumans and toxicToPets to true (safer default) rather than guessing false
+- humanSeverity and petSeverity must be consistent with toxicToHumans/toxicToPets: if toxicToHumans is false, humanSeverity must be 0; if true, humanSeverity must be 1-5 matching the actual severity. Same rule for toxicToPets/petSeverity.
 - toxicityNote should only be non-null when there's a genuinely useful safety detail to add (e.g. "Causes vomiting and oral irritation if chewed by cats or dogs") — leave null for plants with no notable concern
 - Always return all fields. If unsure, make a best guess. Return ONLY JSON.`;
 
@@ -76,16 +79,25 @@ const TOXICITY_SYSTEM_PROMPT = `You are a toxicology expert for plants. Given a 
 {
   "toxicToHumans": <boolean — true if the plant is toxic/poisonous if ingested by humans>,
   "toxicToPets": <boolean — true if toxic/poisonous to cats or dogs if ingested>,
+  "humanSeverity": <integer 0-5 — severity of toxicity to humans: 0 = non-toxic, 1 = mild irritation, 2-3 = moderate GI/systemic symptoms, 4 = severe symptoms requiring medical attention, 5 = potentially fatal>,
+  "petSeverity": <integer 0-5 — severity of toxicity to cats/dogs, same scale: 0 = non-toxic, 1 = mild irritation, 2-3 = moderate GI/systemic symptoms, 4 = severe symptoms requiring vet attention, 5 = potentially fatal>,
   "toxicityNote": <string or null — ONE short, simple sentence, max 100 chars, with an important safety note (e.g. symptoms, severity) if genuinely relevant. Null if non-toxic to both with nothing notable to add.>
 }
 
 Rules:
 - Use real, well-established toxicity knowledge for common houseplants/garden plants — be accurate, not speculative
 - If you are not confident about a plant's toxicity, default toxicToHumans and toxicToPets to true (safer default) rather than guessing false
+- humanSeverity and petSeverity must be consistent with toxicToHumans/toxicToPets: if false, severity must be 0; if true, severity must be 1-5 matching the actual severity
 - toxicityNote should only be non-null when there's a genuinely useful safety detail to add
 - Return ONLY JSON.`;
 
-type ToxicityCheck = { toxicToHumans: boolean; toxicToPets: boolean; toxicityNote: string | null };
+type ToxicityCheck = {
+  toxicToHumans: boolean;
+  toxicToPets: boolean;
+  humanSeverity: number;
+  petSeverity: number;
+  toxicityNote: string | null;
+};
 
 // Independent second opinion on toxicity via Claude Haiku — text-only (name/species),
 // runs after Gemini since it needs Gemini's identification as input. Never throws:
@@ -123,9 +135,15 @@ async function fetchClaudeToxicityCheck(name: string, species: string): Promise<
     const parsed = JSON.parse(jsonStr);
 
     if (typeof parsed.toxicToHumans !== 'boolean' || typeof parsed.toxicToPets !== 'boolean') return null;
+    const isValidSeverity = (n: unknown): n is number =>
+      typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= 5;
+    if (!isValidSeverity(parsed.humanSeverity) || !isValidSeverity(parsed.petSeverity)) return null;
+
     return {
       toxicToHumans: parsed.toxicToHumans,
       toxicToPets: parsed.toxicToPets,
+      humanSeverity: parsed.humanSeverity,
+      petSeverity: parsed.petSeverity,
       toxicityNote: typeof parsed.toxicityNote === 'string' ? parsed.toxicityNote : null,
     };
   } catch {
@@ -133,106 +151,170 @@ async function fetchClaudeToxicityCheck(name: string, species: string): Promise<
   }
 }
 
-type ToxicityOverride = { toxicToHumans: boolean; toxicToPets: boolean; toxicityNote: string | null };
+type ToxicityOverride = {
+  toxicToHumans: boolean;
+  toxicToPets: boolean;
+  humanSeverity: number;
+  petSeverity: number;
+  toxicityNote: string | null;
+};
 
 // Hardcoded, verified ASPCA/veterinary toxicity data for well-known plants — takes
-// priority over both Gemini and Claude's assessments. Keywords favor genus Latin
-// names (long, distinctive strings) over bare common fruit/herb words, since bare
-// words like "lemon" or "mint" can appear as decorative cultivar epithets on
-// unrelated plants (e.g. Philodendron 'Lemon Lime') and would wrongly override
-// that plant's real toxicity profile.
-const TOXICITY_OVERRIDES: { keywords: string[]; data: ToxicityOverride }[] = [
+// priority over both Gemini and Claude's assessments.
+//
+// Matching is genus-first: Gemini's `species` field ("Genus species") is far more
+// standardized across calls than its free-text common `name`, which can be phrased
+// inconsistently between scans of the same plant (e.g. "Orange Tree" vs "Sweet
+// Orange" vs "Orange"). Genus lowercased and compared exactly against the first
+// word of `species`. The `keywords` list is a secondary fallback for when species
+// is missing/vague, checked as a case-insensitive substring of "name species".
+// Keywords still favor distinctive genus Latin names/compound phrases over bare
+// common words, since bare words like "lemon" or "mint" can appear as decorative
+// cultivar epithets on unrelated plants (e.g. Philodendron 'Lemon Lime').
+const TOXICITY_OVERRIDES: { genus: string[]; keywords: string[]; data: ToxicityOverride }[] = [
   {
+    genus: ['citrus'],
     keywords: ['citrus', 'orange tree', 'lemon tree', 'lime tree', 'meyer lemon', 'key lime'],
     data: {
       toxicToHumans: false,
       toxicToPets: true,
+      humanSeverity: 0,
+      petSeverity: 2,
       toxicityNote: 'Essential oils and psoralens in leaves, peel, and stems are toxic to cats and dogs; fruit flesh is safe for humans.',
     },
   },
   {
+    genus: ['lilium', 'hemerocallis'],
     keywords: ['lilium', 'hemerocallis', 'daylily', 'day lily', 'tiger lily', 'easter lily', 'asiatic lily', 'oriental lily', 'stargazer lily', 'true lily'],
     data: {
       toxicToHumans: false,
       toxicToPets: true,
+      humanSeverity: 1,
+      petSeverity: 5,
       toxicityNote: 'Extremely toxic to cats specifically — even pollen or vase water can cause fatal kidney failure.',
     },
   },
   {
+    genus: ['epipremnum', 'scindapsus'],
     keywords: ['pothos', 'epipremnum', "devil's ivy", 'devils ivy', 'scindapsus'],
     data: {
       toxicToHumans: true,
       toxicToPets: true,
+      humanSeverity: 1,
+      petSeverity: 2,
       toxicityNote: 'Calcium oxalate crystals cause oral burning and swelling in both humans and pets if chewed.',
     },
   },
   {
+    genus: ['aloe'],
     keywords: ['aloe vera', 'aloe barbadensis'],
     data: {
       toxicToHumans: true,
       toxicToPets: true,
+      humanSeverity: 1,
+      petSeverity: 2,
       toxicityNote: 'Saponins and anthraquinones cause vomiting/diarrhea in pets; mild GI irritation in humans if ingested.',
     },
   },
   {
+    genus: ['crassula'],
     keywords: ['crassula', 'jade plant'],
     data: {
       toxicToHumans: false,
       toxicToPets: true,
+      humanSeverity: 0,
+      petSeverity: 2,
       toxicityNote: 'Mildly toxic to cats and dogs — can cause vomiting, incoordination, or lethargy if chewed.',
     },
   },
   {
+    genus: ['sansevieria'],
     keywords: ['sansevieria', 'snake plant', 'dracaena trifasciata', "mother-in-law's tongue", 'mother in law’s tongue'],
     data: {
       toxicToHumans: false,
       toxicToPets: true,
+      humanSeverity: 0,
+      petSeverity: 1,
       toxicityNote: 'Mildly toxic to pets — saponins can cause drooling, vomiting, or diarrhea if chewed.',
     },
   },
   {
+    genus: ['spathiphyllum'],
     keywords: ['peace lily', 'spathiphyllum'],
     data: {
       toxicToHumans: true,
       toxicToPets: true,
+      humanSeverity: 1,
+      petSeverity: 2,
       toxicityNote: 'Calcium oxalate crystals cause oral burning, swelling, and drooling in humans and pets.',
     },
   },
   {
+    genus: ['ocimum'],
     keywords: ['basil', 'ocimum'],
-    data: { toxicToHumans: false, toxicToPets: false, toxicityNote: null },
+    data: { toxicToHumans: false, toxicToPets: false, humanSeverity: 0, petSeverity: 0, toxicityNote: null },
   },
   {
+    genus: ['rosmarinus'],
     keywords: ['rosemary', 'rosmarinus', 'salvia rosmarinus'],
-    data: { toxicToHumans: false, toxicToPets: false, toxicityNote: null },
+    data: { toxicToHumans: false, toxicToPets: false, humanSeverity: 0, petSeverity: 0, toxicityNote: null },
   },
   {
+    genus: ['mentha'],
     keywords: ['mentha', 'peppermint', 'spearmint'],
-    data: { toxicToHumans: false, toxicToPets: false, toxicityNote: null },
+    data: { toxicToHumans: false, toxicToPets: false, humanSeverity: 0, petSeverity: 1, toxicityNote: null },
   },
   {
+    genus: ['thymus'],
     keywords: ['thymus', 'thyme'],
-    data: { toxicToHumans: false, toxicToPets: false, toxicityNote: null },
+    data: { toxicToHumans: false, toxicToPets: false, humanSeverity: 0, petSeverity: 0, toxicityNote: null },
   },
   {
+    genus: ['echeveria'],
     keywords: ['echeveria'],
-    data: { toxicToHumans: false, toxicToPets: false, toxicityNote: null },
+    data: { toxicToHumans: false, toxicToPets: false, humanSeverity: 0, petSeverity: 0, toxicityNote: null },
   },
   {
+    genus: ['chlorophytum'],
     keywords: ['spider plant', 'chlorophytum comosum', 'chlorophytum'],
     data: {
       toxicToHumans: false,
       toxicToPets: false,
+      humanSeverity: 0,
+      petSeverity: 1,
       toxicityNote: 'Contains mild compounds that can cause temporary "catnip-like" euphoria in cats, but is not dangerous.',
     },
   },
 ];
 
+function extractGenus(species: string): string {
+  return species.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+}
+
 function findToxicityOverride(name: string, species: string): ToxicityOverride | null {
+  // Primary: genus match — species names are standardized, unlike common names.
+  const genus = extractGenus(species);
+  if (genus) {
+    for (const entry of TOXICITY_OVERRIDES) {
+      if (entry.genus.includes(genus)) {
+        console.log(`[toxicity-override] genus match: "${genus}" (species="${species}")`);
+        return entry.data;
+      }
+    }
+  }
+
+  // Secondary: fallback keyword substring match against "name species".
   const haystack = `${name} ${species}`.toLowerCase();
   for (const entry of TOXICITY_OVERRIDES) {
-    if (entry.keywords.some(kw => haystack.includes(kw))) return entry.data;
+    const matchedKeyword = entry.keywords.find(kw => haystack.includes(kw));
+    if (matchedKeyword) {
+      console.log(`[toxicity-override] keyword fallback match: "${matchedKeyword}" (name="${name}", species="${species}")`);
+      return entry.data;
+    }
   }
+
+  // Neither matched — log for periodic review, to spot common plants worth adding.
+  console.log(`[toxicity-override] no match — name="${name}", species="${species}"`);
   return null;
 }
 
@@ -295,6 +377,9 @@ serve(async (req: Request) => {
     if (claudeToxicity) {
       parsed.toxicToHumans = parsed.toxicToHumans || claudeToxicity.toxicToHumans;
       parsed.toxicToPets   = parsed.toxicToPets   || claudeToxicity.toxicToPets;
+      // Severity is a 0-5 number, not a boolean — take the higher (more cautious) of the two.
+      parsed.humanSeverity = Math.max(parsed.humanSeverity ?? 0, claudeToxicity.humanSeverity);
+      parsed.petSeverity   = Math.max(parsed.petSeverity ?? 0, claudeToxicity.petSeverity);
       if (parsed.toxicityNote && claudeToxicity.toxicityNote && parsed.toxicityNote !== claudeToxicity.toxicityNote) {
         parsed.toxicityNote = `${parsed.toxicityNote} ${claudeToxicity.toxicityNote}`;
       } else {
@@ -307,8 +392,16 @@ serve(async (req: Request) => {
     if (toxicityOverride) {
       parsed.toxicToHumans = toxicityOverride.toxicToHumans;
       parsed.toxicToPets   = toxicityOverride.toxicToPets;
+      parsed.humanSeverity = toxicityOverride.humanSeverity;
+      parsed.petSeverity   = toxicityOverride.petSeverity;
       parsed.toxicityNote  = toxicityOverride.toxicityNote;
     }
+
+    // Expose severity under the snake_case field names the client expects.
+    parsed.human_toxicity_severity = parsed.humanSeverity;
+    parsed.pet_toxicity_severity   = parsed.petSeverity;
+    delete parsed.humanSeverity;
+    delete parsed.petSeverity;
 
     return new Response(JSON.stringify(parsed), {
       headers: { ...CORS, 'Content-Type': 'application/json' },

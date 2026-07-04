@@ -19,20 +19,22 @@ import { supabase } from '../../lib/supabase';
 import { scheduleTaskNotification, cancelPlantNotifications } from '../../lib/notifications';
 import { getLevel, xpToNextLevel } from '../../lib/levels';
 import type { Plant, CareTask, PlantPhoto } from '../../types/database';
-import { Colors, Spacing, Radius, FontSize } from '../../constants/theme';
+import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
+import { useTheme } from '../../contexts/ThemeContext';
+import ToxicitySeverityBar from '../../components/ToxicitySeverityBar';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PHOTO_COL_SIZE = (SCREEN_WIDTH - Spacing.md * 2 - Spacing.sm * 2) / 3;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getMood(health: number): { icon: 'happy' | 'remove-circle-outline' | 'sad-outline'; color: string } {
+function getMood(health: number, Colors: ColorPalette): { icon: 'happy' | 'remove-circle-outline' | 'sad-outline'; color: string } {
   if (health >= 80) return { icon: 'happy',                 color: Colors.primary };
   if (health >= 50) return { icon: 'remove-circle-outline', color: Colors.warning };
   return               { icon: 'sad-outline',               color: Colors.danger  };
 }
 
-function getWateringStatus(task: CareTask | null): {
+function getWateringStatus(task: CareTask | null, Colors: ColorPalette): {
   text: string;
   color: string;
   urgent: boolean;
@@ -51,7 +53,7 @@ function getWateringStatus(task: CareTask | null): {
   return { text: `Water in ${diff} days`, color: Colors.primary, urgent: false };
 }
 
-function getWateringProgress(task: CareTask | null): { pct: number; color: string } | null {
+function getWateringProgress(task: CareTask | null, Colors: ColorPalette): { pct: number; color: string } | null {
   if (!task) return null;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -84,6 +86,8 @@ const WATERING_LABELS: Record<string, string> = {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function PlantDetailScreen() {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
   const params = useLocalSearchParams<{ id: string }>();
   const plantId = Array.isArray(params.id) ? params.id[0] : params.id;
   const router = useRouter();
@@ -295,9 +299,9 @@ export default function PlantDetailScreen() {
   // ── Derived state ────────────────────────────────────────────────────────────
   const level = getLevel(totalXP);
   const { pct: xpPct, needed: xpNeeded } = xpToNextLevel(totalXP);
-  const { icon: moodIcon, color: moodColor } = getMood(plant.health_percent);
-  const watering         = getWateringStatus(wateringTask);
-  const wateringProgress = getWateringProgress(wateringTask);
+  const { icon: moodIcon, color: moodColor } = getMood(plant.health_percent, Colors);
+  const watering         = getWateringStatus(wateringTask, Colors);
+  const wateringProgress = getWateringProgress(wateringTask, Colors);
 
   const infoItems = [
     { icon: 'water-outline',       label: 'Watering',     value: plant.watering_frequency ? WATERING_LABELS[plant.watering_frequency] : '—' },
@@ -427,24 +431,8 @@ export default function PlantDetailScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Toxicity</Text>
             <View style={styles.toxicityRow}>
-              <View style={[styles.toxicityCard, plant.toxic_to_humans ? styles.toxicityCardToxic : styles.toxicityCardSafe]}>
-                <View style={styles.toxicityLabelRow}>
-                  <Ionicons name="body-outline" size={14} color={Colors.textMuted} />
-                  <Text style={styles.toxicityLabel}>Humans</Text>
-                </View>
-                <Text style={[styles.toxicityValue, { color: plant.toxic_to_humans ? Colors.danger : Colors.primary }]}>
-                  {plant.toxic_to_humans ? 'Toxic' : 'Non-Toxic'}
-                </Text>
-              </View>
-              <View style={[styles.toxicityCard, plant.toxic_to_pets ? styles.toxicityCardToxic : styles.toxicityCardSafe]}>
-                <View style={styles.toxicityLabelRow}>
-                  <Ionicons name="paw" size={14} color={Colors.textMuted} />
-                  <Text style={styles.toxicityLabel}>Pets</Text>
-                </View>
-                <Text style={[styles.toxicityValue, { color: plant.toxic_to_pets ? Colors.danger : Colors.primary }]}>
-                  {plant.toxic_to_pets ? 'Toxic' : 'Non-Toxic'}
-                </Text>
-              </View>
+              <ToxicitySeverityBar label="Humans" icon="body-outline" severity={plant.human_toxicity_severity ?? 0} />
+              <ToxicitySeverityBar label="Pets" icon="paw" severity={plant.pet_toxicity_severity ?? 0} />
             </View>
             {plant.toxicity_note && (
               <Text style={styles.toxicityNote}>{plant.toxicity_note}</Text>
@@ -596,7 +584,8 @@ export default function PlantDetailScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
+  return StyleSheet.create({
   safe:    { flex: 1, backgroundColor: Colors.background },
   centered: { flex: 1, backgroundColor: Colors.background, justifyContent: 'center', alignItems: 'center' },
   scroll:  { paddingBottom: Spacing.xxl },
@@ -743,19 +732,6 @@ const styles = StyleSheet.create({
 
   // Toxicity
   toxicityRow: { flexDirection: 'row', gap: Spacing.sm },
-  toxicityCard: {
-    flex: 1,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    padding: Spacing.md,
-    alignItems: 'center',
-    gap: 4,
-  },
-  toxicityCardToxic: { backgroundColor: 'rgba(231,76,60,0.1)', borderColor: Colors.danger },
-  toxicityCardSafe: { backgroundColor: 'rgba(46,204,113,0.1)', borderColor: Colors.primary },
-  toxicityLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  toxicityLabel: { fontSize: FontSize.xs, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.6 },
-  toxicityValue: { fontSize: FontSize.sm, fontWeight: '700' },
   toxicityNote: { fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 17, marginTop: Spacing.sm },
 
   // Care tip
@@ -941,4 +917,5 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(46,204,113,0.06)',
   },
   addPhotoBtnText: { fontSize: FontSize.md, fontWeight: '600', color: Colors.primary },
-});
+  });
+}

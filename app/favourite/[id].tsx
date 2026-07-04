@@ -14,7 +14,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import type { Favourite } from '../../types/database';
-import { Colors, Spacing, Radius, FontSize } from '../../constants/theme';
+import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
+import { useTheme } from '../../contexts/ThemeContext';
+import ToxicitySeverityBar from '../../components/ToxicitySeverityBar';
 
 const SUNLIGHT_LABELS: Record<string, string> = {
   low: 'Low Light',
@@ -29,6 +31,8 @@ const WATERING_LABELS: Record<string, string> = {
 };
 
 export default function FavouriteDetailScreen() {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [favourite, setFavourite] = useState<Favourite | null>(null);
@@ -138,24 +142,8 @@ export default function FavouriteDetailScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Toxicity</Text>
             <View style={styles.toxicityRow}>
-              <View style={[styles.toxicityCard, favourite.toxic_to_humans ? styles.toxicityCardToxic : styles.toxicityCardSafe]}>
-                <View style={styles.toxicityLabelRow}>
-                  <Ionicons name="body-outline" size={14} color={Colors.textMuted} />
-                  <Text style={styles.toxicityLabel}>Humans</Text>
-                </View>
-                <Text style={[styles.toxicityValue, { color: favourite.toxic_to_humans ? Colors.danger : Colors.primary }]}>
-                  {favourite.toxic_to_humans ? 'Toxic' : 'Non-Toxic'}
-                </Text>
-              </View>
-              <View style={[styles.toxicityCard, favourite.toxic_to_pets ? styles.toxicityCardToxic : styles.toxicityCardSafe]}>
-                <View style={styles.toxicityLabelRow}>
-                  <Ionicons name="paw" size={14} color={Colors.textMuted} />
-                  <Text style={styles.toxicityLabel}>Pets</Text>
-                </View>
-                <Text style={[styles.toxicityValue, { color: favourite.toxic_to_pets ? Colors.danger : Colors.primary }]}>
-                  {favourite.toxic_to_pets ? 'Toxic' : 'Non-Toxic'}
-                </Text>
-              </View>
+              <ToxicitySeverityBar label="Humans" icon="body-outline" severity={favourite.human_toxicity_severity ?? 0} />
+              <ToxicitySeverityBar label="Pets" icon="paw" severity={favourite.pet_toxicity_severity ?? 0} />
             </View>
             {favourite.toxicity_note && (
               <Text style={styles.toxicityNote}>{favourite.toxicity_note}</Text>
@@ -229,7 +217,8 @@ export default function FavouriteDetailScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
+  return StyleSheet.create({
   safe:    { flex: 1, backgroundColor: Colors.background },
   centered: { flex: 1, backgroundColor: Colors.background, justifyContent: 'center', alignItems: 'center' },
   scroll:  { paddingBottom: Spacing.xxl },
@@ -313,19 +302,6 @@ const styles = StyleSheet.create({
 
   // Toxicity
   toxicityRow: { flexDirection: 'row', gap: Spacing.sm },
-  toxicityCard: {
-    flex: 1,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    padding: Spacing.md,
-    alignItems: 'center',
-    gap: 4,
-  },
-  toxicityCardToxic: { backgroundColor: 'rgba(231,76,60,0.1)', borderColor: Colors.danger },
-  toxicityCardSafe: { backgroundColor: 'rgba(46,204,113,0.1)', borderColor: Colors.primary },
-  toxicityLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  toxicityLabel: { fontSize: FontSize.xs, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.6 },
-  toxicityValue: { fontSize: FontSize.sm, fontWeight: '700' },
   toxicityNote: { fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 17, marginTop: Spacing.sm },
 
   // Info grid
@@ -408,4 +384,5 @@ const styles = StyleSheet.create({
   },
   remedyBadgeText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.background },
   remedyText: { flex: 1, fontSize: FontSize.md, fontWeight: '600', color: Colors.textPrimary, lineHeight: 20 },
-});
+  });
+}

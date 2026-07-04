@@ -14,7 +14,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import type { CareTaskWithPlantPhoto } from '../../types/database';
-import { Colors, Spacing, Radius, FontSize } from '../../constants/theme';
+import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
+import { useTheme } from '../../contexts/ThemeContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,8 @@ function groupBySchedule(tasks: CareTaskWithPlantPhoto[]): ScheduleGroup[] {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function ScheduleScreen() {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
   const router = useRouter();
   const [tasks, setTasks]           = useState<CareTaskWithPlantPhoto[]>([]);
   const [loading, setLoading]       = useState(true);
@@ -197,7 +200,8 @@ export default function ScheduleScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
+  return StyleSheet.create({
   safe:    { flex: 1, backgroundColor: Colors.background },
   content: { padding: Spacing.md, paddingBottom: Spacing.xxl },
   loader:  { marginTop: 80 },
@@ -309,4 +313,5 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.xp,
   },
-});
+  });
+}

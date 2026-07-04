@@ -24,6 +24,8 @@ export type Database = {
           health_tips_pro: string[] | null;
           toxic_to_humans: boolean | null;
           toxic_to_pets: boolean | null;
+          human_toxicity_severity: number | null;
+          pet_toxicity_severity: number | null;
           toxicity_note: string | null;
         };
         Insert: {
@@ -48,6 +50,8 @@ export type Database = {
           health_tips_pro?: string[] | null;
           toxic_to_humans?: boolean | null;
           toxic_to_pets?: boolean | null;
+          human_toxicity_severity?: number | null;
+          pet_toxicity_severity?: number | null;
           toxicity_note?: string | null;
         };
         Update: {
@@ -72,6 +76,8 @@ export type Database = {
           health_tips_pro?: string[] | null;
           toxic_to_humans?: boolean | null;
           toxic_to_pets?: boolean | null;
+          human_toxicity_severity?: number | null;
+          pet_toxicity_severity?: number | null;
           toxicity_note?: string | null;
         };
         Relationships: [];
@@ -93,6 +99,8 @@ export type Database = {
           health_tips_pro: string[] | null;
           toxic_to_humans: boolean | null;
           toxic_to_pets: boolean | null;
+          human_toxicity_severity: number | null;
+          pet_toxicity_severity: number | null;
           toxicity_note: string | null;
           created_at: string;
         };
@@ -112,6 +120,8 @@ export type Database = {
           health_tips_pro?: string[] | null;
           toxic_to_humans?: boolean | null;
           toxic_to_pets?: boolean | null;
+          human_toxicity_severity?: number | null;
+          pet_toxicity_severity?: number | null;
           toxicity_note?: string | null;
           created_at?: string;
         };
@@ -131,6 +141,8 @@ export type Database = {
           health_tips_pro?: string[] | null;
           toxic_to_humans?: boolean | null;
           toxic_to_pets?: boolean | null;
+          human_toxicity_severity?: number | null;
+          pet_toxicity_severity?: number | null;
           toxicity_note?: string | null;
           created_at?: string;
         };

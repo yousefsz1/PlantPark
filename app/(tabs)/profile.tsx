@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
-import { Colors, Spacing, Radius, FontSize } from '../../constants/theme';
-import { useEffect } from 'react';
+import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
+import { useTheme } from '../../contexts/ThemeContext';
 import type { User } from '@supabase/supabase-js';
 
 const BADGES = [
@@ -24,12 +25,17 @@ const MENU_ITEMS = [
 ] as const;
 
 export default function ProfileScreen() {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
+  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [signingOut, setSigningOut] = useState(false);
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUser(data.user));
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      supabase.auth.getUser().then(({ data }) => setUser(data.user));
+    }, []),
+  );
 
   async function handleSignOut() {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -96,7 +102,11 @@ export default function ProfileScreen() {
         {/* Account menu */}
         <Text style={styles.sectionTitle}>Account</Text>
         {MENU_ITEMS.map((item) => (
-          <TouchableOpacity key={item.label} style={styles.menuRow}>
+          <TouchableOpacity
+            key={item.label}
+            style={styles.menuRow}
+            onPress={item.label === 'Settings' ? () => router.push('/settings') : undefined}
+          >
             <Ionicons name={item.icon as any} size={20} color={Colors.textSecondary} />
             <Text style={styles.menuLabel}>{item.label}</Text>
             <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
@@ -122,7 +132,8 @@ export default function ProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
+  return StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.background },
   content: { padding: Spacing.md, paddingBottom: Spacing.xxl },
 
@@ -226,4 +237,5 @@ const styles = StyleSheet.create({
     backgroundColor: '#1A0A0A',
   },
   signOutText: { fontSize: FontSize.md, fontWeight: '600', color: Colors.danger },
-});
+  });
+}

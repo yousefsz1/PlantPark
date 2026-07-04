@@ -13,7 +13,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
-import { Colors, Spacing, Radius, FontSize } from '../constants/theme';
+import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../constants/theme';
+import { useTheme } from '../contexts/ThemeContext';
 
 type Mode = 'login' | 'signup';
 
@@ -36,6 +37,8 @@ function friendlyError(message: string): string {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function AuthScreen() {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
   const [mode, setMode] = useState<Mode>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -189,7 +192,7 @@ export default function AuthScreen() {
                     style={styles.textInput}
                     value={name}
                     onChangeText={(v) => { setName(v); clearError(); }}
-                    placeholder="e.g. Yousef"
+                    placeholder="e.g. Rose"
                     placeholderTextColor={Colors.textMuted}
                     autoCapitalize="words"
                     autoCorrect={false}
@@ -287,7 +290,8 @@ export default function AuthScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
+  return StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.background },
   scroll: { flexGrow: 1, padding: Spacing.lg, justifyContent: 'center' },
 
@@ -411,4 +415,5 @@ const styles = StyleSheet.create({
     padding: Spacing.sm,
   },
   backBtnText: { fontSize: FontSize.md, color: Colors.primary, fontWeight: '600' },
-});
+  });
+}

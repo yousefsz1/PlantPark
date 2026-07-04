@@ -6,7 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import type { Session } from '@supabase/supabase-js';
 import * as Notifications from 'expo-notifications';
 import { supabase } from '../lib/supabase';
-import { Colors } from '../constants/theme';
+import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -17,6 +17,17 @@ Notifications.setNotificationHandler({
     shouldShowList: true,
   }),
 });
+
+// Rendered inside ThemeProvider (unlike RootLayout itself, which provides the
+// context and so cannot consume it) so it can react to theme changes.
+function AppSplash() {
+  const { Colors } = useTheme();
+  return (
+    <View style={{ flex: 1, backgroundColor: Colors.background, justifyContent: 'center', alignItems: 'center' }}>
+      <ActivityIndicator size="large" color={Colors.primary} />
+    </View>
+  );
+}
 
 export default function RootLayout() {
   const [session, setSession] = useState<Session | null>(null);
@@ -103,23 +114,22 @@ export default function RootLayout() {
   }, [session, initialized, segments]);
 
   // Splash while determining session — prevents flashing the wrong screen
-  if (!initialized) {
-    return (
-      <View style={{ flex: 1, backgroundColor: Colors.background, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
-    );
-  }
-
   return (
-    <>
-      <StatusBar style="light" />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="auth" options={{ animation: 'fade' }} />
-        <Stack.Screen name="add-plant" options={{ presentation: 'modal' }} />
-        <Stack.Screen name="plant/[id]" options={{ headerShown: false }} />
-      </Stack>
-    </>
+    <ThemeProvider>
+      {!initialized ? (
+        <AppSplash />
+      ) : (
+        <>
+          <StatusBar style="light" />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="auth" options={{ animation: 'fade' }} />
+            <Stack.Screen name="add-plant" options={{ presentation: 'modal' }} />
+            <Stack.Screen name="plant/[id]" options={{ headerShown: false }} />
+            <Stack.Screen name="settings" options={{ headerShown: false }} />
+          </Stack>
+        </>
+      )}
+    </ThemeProvider>
   );
 }
