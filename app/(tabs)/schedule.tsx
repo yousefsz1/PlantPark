@@ -4,108 +4,110 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  TouchableOpacity,
   ActivityIndicator,
   Image,
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
-import type { JournalEntryWithPlant } from '../../types/database';
+import type { CareTaskWithPlantPhoto } from '../../types/database';
 import { Colors, Spacing, Radius, FontSize } from '../../constants/theme';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type EntryType = JournalEntryWithPlant['entry_type'];
-type DateGroup  = { label: string; entries: JournalEntryWithPlant[] };
+type TaskType = CareTaskWithPlantPhoto['task_type'];
+type ScheduleGroup = { label: string; tasks: CareTaskWithPlantPhoto[] };
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const ENTRY_CONFIG: Record<EntryType, {
-  icon:    string;
-  color:   string;
-  bgColor: string;
-}> = {
-  added:        { icon: 'leaf',           color: Colors.primary, bgColor: 'rgba(46,204,113,0.15)'  },
-  watered:      { icon: 'water',          color: '#4A90D9',      bgColor: 'rgba(74,144,217,0.15)'  },
-  fertilized:   { icon: 'leaf',           color: '#E67E22',      bgColor: 'rgba(230,126,34,0.15)'  },
-  misted:       { icon: 'cloudy-outline', color: '#6BB5C5',      bgColor: 'rgba(107,181,197,0.15)' },
-  level_up:     { icon: 'trophy',         color: '#F4D03F',      bgColor: 'rgba(244,208,63,0.15)'  },
-  health_issue: { icon: 'warning',        color: Colors.warning, bgColor: 'rgba(243,156,18,0.15)'  },
-  note:         { icon: 'pencil-outline', color: Colors.textMuted, bgColor: 'rgba(107,158,128,0.12)' },
+const TASK_CONFIG: Record<TaskType, { icon: string; color: string; label: string }> = {
+  watering:    { icon: 'water',          color: '#4A90D9', label: 'Water' },
+  fertilizing: { icon: 'leaf',           color: '#E67E22', label: 'Fertilize' },
+  misting:     { icon: 'cloudy-outline', color: '#6BB5C5', label: 'Mist' },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function dateGroupLabel(created_at: string): string {
-  const d = new Date(created_at);
-  d.setHours(0, 0, 0, 0);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const diff = Math.floor((today.getTime() - d.getTime()) / 86_400_000);
-  if (diff === 0) return 'Today';
-  if (diff === 1) return 'Yesterday';
-  if (diff <= 6)  return 'This week';
-  if (diff <= 29) return 'Earlier this month';
-  return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+function todayISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function groupByDate(entries: JournalEntryWithPlant[]): DateGroup[] {
-  const groups = new Map<string, JournalEntryWithPlant[]>();
-  for (const entry of entries) {
-    const label = dateGroupLabel(entry.created_at);
-    if (!groups.has(label)) groups.set(label, []);
-    groups.get(label)!.push(entry);
+function addDaysToToday(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function formatDueDate(due_date: string): string {
+  // Parse as local date, not UTC, to avoid off-by-one day shifts
+  const [y, m, d] = due_date.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function groupBySchedule(tasks: CareTaskWithPlantPhoto[]): ScheduleGroup[] {
+  const today = todayISO();
+  const tomorrow = addDaysToToday(1);
+  const weekEnd = addDaysToToday(7);
+
+  const buckets: Record<'Today' | 'Tomorrow' | 'This Week' | 'Later', CareTaskWithPlantPhoto[]> = {
+    'Today': [],
+    'Tomorrow': [],
+    'This Week': [],
+    'Later': [],
+  };
+
+  for (const task of tasks) {
+    if (task.due_date <= today) buckets['Today'].push(task);
+    else if (task.due_date === tomorrow) buckets['Tomorrow'].push(task);
+    else if (task.due_date <= weekEnd) buckets['This Week'].push(task);
+    else buckets['Later'].push(task);
   }
-  return Array.from(groups.entries()).map(([label, entries]) => ({ label, entries }));
-}
 
-function extractXP(message: string): number | null {
-  const m = message.match(/\+(\d+) XP/);
-  return m ? parseInt(m[1], 10) : null;
-}
-
-function entryTime(created_at: string): string {
-  return new Date(created_at).toLocaleTimeString('en-US', {
-    hour: 'numeric', minute: '2-digit',
-  });
+  return (['Today', 'Tomorrow', 'This Week', 'Later'] as const)
+    .filter(label => buckets[label].length > 0)
+    .map(label => ({ label, tasks: buckets[label] }));
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
-export default function JournalScreen() {
-  const [entries, setEntries]       = useState<JournalEntryWithPlant[]>([]);
+export default function ScheduleScreen() {
+  const router = useRouter();
+  const [tasks, setTasks]           = useState<CareTaskWithPlantPhoto[]>([]);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const hasLoaded = useRef(false);
 
-  const fetchEntries = useCallback(async () => {
+  const fetchTasks = useCallback(async () => {
     const { data } = await supabase
-      .from('journal_entries')
+      .from('care_tasks')
       .select('*, plants(id, name, photo_url)')
-      .order('created_at', { ascending: false })
-      .limit(150);
-    setEntries((data ?? []) as JournalEntryWithPlant[]);
+      .is('completed_at', null)
+      .order('due_date', { ascending: true });
+    setTasks((data ?? []) as CareTaskWithPlantPhoto[]);
   }, []);
 
   useFocusEffect(
     useCallback(() => {
       if (!hasLoaded.current) setLoading(true);
-      fetchEntries().finally(() => {
+      fetchTasks().finally(() => {
         setLoading(false);
         hasLoaded.current = true;
       });
-    }, [fetchEntries]),
+    }, [fetchTasks]),
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchEntries();
+    await fetchTasks();
     setRefreshing(false);
-  }, [fetchEntries]);
+  }, [fetchTasks]);
 
-  const groups = groupByDate(entries);
+  const groups = groupBySchedule(tasks);
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
@@ -119,92 +121,70 @@ export default function JournalScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>Journal</Text>
-          <Text style={styles.subtitle}>Your plant care activity</Text>
+          <Text style={styles.title}>Schedule</Text>
+          <Text style={styles.subtitle}>Upcoming plant care</Text>
         </View>
 
         {/* Body */}
         {loading ? (
           <ActivityIndicator size="large" color={Colors.primary} style={styles.loader} />
-        ) : entries.length === 0 ? (
+        ) : tasks.length === 0 ? (
           <View style={styles.emptyState}>
             <View style={styles.emptyIcon}>
-              <Ionicons name="leaf-outline" size={40} color={Colors.primary} />
+              <Ionicons name="checkmark-circle-outline" size={40} color={Colors.primary} />
             </View>
-            <Text style={styles.emptyTitle}>No activity yet</Text>
+            <Text style={styles.emptyTitle}>All caught up! 🌱</Text>
             <Text style={styles.emptySubtitle}>
-              Scan or water a plant to start earning rewards!
+              No upcoming care tasks — check back later or add a new plant.
             </Text>
           </View>
         ) : (
           groups.map(group => (
             <View key={group.label}>
               <Text style={styles.dateLabel}>{group.label}</Text>
-              {group.entries.map(entry => {
-                const cfg  = ENTRY_CONFIG[entry.entry_type] ?? ENTRY_CONFIG.note;
-                const xp   = extractXP(entry.message);
-                const isLevelUp = entry.entry_type === 'level_up';
-                const isIssue   = entry.entry_type === 'health_issue';
+              {group.tasks.map(task => {
+                const cfg = TASK_CONFIG[task.task_type] ?? TASK_CONFIG.watering;
 
                 return (
-                  <View
-                    key={entry.id}
-                    style={[
-                      styles.entryCard,
-                      isLevelUp && styles.entryCardLevelUp,
-                      isIssue   && styles.entryCardIssue,
-                    ]}
+                  <TouchableOpacity
+                    key={task.id}
+                    style={styles.taskCard}
+                    activeOpacity={0.8}
+                    onPress={() => task.plants && router.push(`/plant/${task.plants.id}`)}
                   >
                     {/* Left: photo or icon */}
                     <View style={styles.avatarWrap}>
-                      {entry.plants?.photo_url ? (
+                      {task.plants?.photo_url ? (
                         <>
                           <Image
-                            source={{ uri: entry.plants.photo_url }}
+                            source={{ uri: task.plants.photo_url }}
                             style={styles.plantThumb}
                             resizeMode="cover"
                           />
-                          {/* Entry-type badge overlaid on photo corner */}
                           <View style={[styles.iconBadge, { backgroundColor: cfg.color }]}>
                             <Ionicons name={cfg.icon as any} size={10} color="#FFFFFF" />
                           </View>
                         </>
                       ) : (
-                        <View style={[styles.iconCircle, { backgroundColor: cfg.bgColor }]}>
+                        <View style={[styles.iconCircle, { backgroundColor: `${cfg.color}26` }]}>
                           <Ionicons name={cfg.icon as any} size={22} color={cfg.color} />
                         </View>
                       )}
                     </View>
 
-                    {/* Middle: message + meta */}
-                    <View style={styles.entryBody}>
-                      <Text style={styles.entryMessage}>{entry.message}</Text>
-                      <View style={styles.entryMeta}>
-                        {entry.plants?.name ? (
-                          <>
-                            <Text style={[styles.entryPlantName, { color: cfg.color }]}>
-                              {entry.plants.name}
-                            </Text>
-                            <Text style={styles.entryMetaDot}>·</Text>
-                          </>
-                        ) : null}
-                        <Text style={styles.entryTime}>{entryTime(entry.created_at)}</Text>
-                      </View>
+                    {/* Middle: task + plant name + due date */}
+                    <View style={styles.taskBody}>
+                      <Text style={styles.taskMessage}>
+                        {cfg.label} {task.plants?.name ?? 'plant'}
+                      </Text>
+                      <Text style={styles.taskDueDate}>{formatDueDate(task.due_date)}</Text>
                     </View>
 
-                    {/* Right: XP badge or level-up star */}
-                    {xp !== null ? (
-                      <View style={[styles.xpBadge, isLevelUp && styles.xpBadgeLevelUp]}>
-                        <Text style={[styles.xpBadgeText, isLevelUp && styles.xpBadgeTextLevelUp]}>
-                          +{xp} XP
-                        </Text>
-                      </View>
-                    ) : isLevelUp ? (
-                      <View style={styles.levelUpStar}>
-                        <Ionicons name="star" size={18} color="#F4D03F" />
-                      </View>
-                    ) : null}
-                  </View>
+                    {/* Right: XP badge */}
+                    <View style={styles.xpBadge}>
+                      <Text style={styles.xpBadgeText}>+{task.xp_reward} XP</Text>
+                    </View>
+                  </TouchableOpacity>
                 );
               })}
             </View>
@@ -257,7 +237,7 @@ const styles = StyleSheet.create({
     maxWidth: 260,
   },
 
-  // Date group labels
+  // Section labels
   dateLabel: {
     fontSize: FontSize.xs,
     fontWeight: '700',
@@ -268,8 +248,8 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
 
-  // Entry cards
-  entryCard: {
+  // Task cards
+  taskCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.card,
@@ -279,14 +259,6 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
     borderWidth: 1,
     borderColor: Colors.border,
-  },
-  entryCardLevelUp: {
-    borderColor: 'rgba(244,208,63,0.45)',
-    backgroundColor: 'rgba(244,208,63,0.05)',
-  },
-  entryCardIssue: {
-    borderColor: 'rgba(243,156,18,0.35)',
-    backgroundColor: 'rgba(243,156,18,0.04)',
   },
 
   // Avatar (photo or icon)
@@ -317,13 +289,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
-  // Entry body
-  entryBody:      { flex: 1, gap: 3 },
-  entryMessage:   { fontSize: FontSize.sm, color: Colors.textPrimary, lineHeight: 19 },
-  entryMeta:      { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  entryPlantName: { fontSize: FontSize.xs, fontWeight: '600' },
-  entryMetaDot:   { fontSize: FontSize.xs, color: Colors.textMuted },
-  entryTime:      { fontSize: FontSize.xs, color: Colors.textMuted },
+  // Task body
+  taskBody:    { flex: 1, gap: 3 },
+  taskMessage: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.textPrimary, lineHeight: 19 },
+  taskDueDate: { fontSize: FontSize.xs, color: Colors.textMuted },
 
   // XP badge
   xpBadge: {
@@ -335,25 +304,9 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(244,208,63,0.3)',
     flexShrink: 0,
   },
-  xpBadgeLevelUp: {
-    backgroundColor: 'rgba(244,208,63,0.2)',
-    borderColor: 'rgba(244,208,63,0.6)',
-  },
   xpBadgeText: {
     fontSize: FontSize.xs,
     fontWeight: '700',
     color: Colors.xp,
-  },
-  xpBadgeTextLevelUp: { color: '#F4D03F' },
-
-  // Level-up star (when there's no XP in the message)
-  levelUpStar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(244,208,63,0.12)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    flexShrink: 0,
   },
 });

@@ -282,6 +282,10 @@ export type CareTaskWithPlant = CareTask & {
   plants: { id: string; name: string } | null;
 };
 
+export type CareTaskWithPlantPhoto = CareTask & {
+  plants: { id: string; name: string; photo_url: string | null } | null;
+};
+
 export type JournalEntry = Database['public']['Tables']['journal_entries']['Row'];
 export type JournalEntryWithPlant = JournalEntry & {
   plants: { id: string; name: string; photo_url: string | null } | null;

@@ -15,7 +15,7 @@ const TABS: TabConfig[] = [
   { name: 'index',      title: 'Garden',     icon: 'leaf-outline',   iconFocused: 'leaf' },
   { name: 'scan',       title: 'Scan',       icon: 'scan-outline',   iconFocused: 'scan' },
   { name: 'favourites', title: 'Favourites', icon: 'heart-outline',  iconFocused: 'heart' },
-  { name: 'journal',    title: 'Journal',    icon: 'book-outline',   iconFocused: 'book' },
+  { name: 'schedule',   title: 'Schedule',   icon: 'calendar-outline', iconFocused: 'calendar' },
   { name: 'profile',    title: 'Profile',    icon: 'person-outline', iconFocused: 'person' },
 ];
 
