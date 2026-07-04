@@ -133,6 +133,109 @@ async function fetchClaudeToxicityCheck(name: string, species: string): Promise<
   }
 }
 
+type ToxicityOverride = { toxicToHumans: boolean; toxicToPets: boolean; toxicityNote: string | null };
+
+// Hardcoded, verified ASPCA/veterinary toxicity data for well-known plants — takes
+// priority over both Gemini and Claude's assessments. Keywords favor genus Latin
+// names (long, distinctive strings) over bare common fruit/herb words, since bare
+// words like "lemon" or "mint" can appear as decorative cultivar epithets on
+// unrelated plants (e.g. Philodendron 'Lemon Lime') and would wrongly override
+// that plant's real toxicity profile.
+const TOXICITY_OVERRIDES: { keywords: string[]; data: ToxicityOverride }[] = [
+  {
+    keywords: ['citrus', 'orange tree', 'lemon tree', 'lime tree', 'meyer lemon', 'key lime'],
+    data: {
+      toxicToHumans: false,
+      toxicToPets: true,
+      toxicityNote: 'Essential oils and psoralens in leaves, peel, and stems are toxic to cats and dogs; fruit flesh is safe for humans.',
+    },
+  },
+  {
+    keywords: ['lilium', 'hemerocallis', 'daylily', 'day lily', 'tiger lily', 'easter lily', 'asiatic lily', 'oriental lily', 'stargazer lily', 'true lily'],
+    data: {
+      toxicToHumans: false,
+      toxicToPets: true,
+      toxicityNote: 'Extremely toxic to cats specifically — even pollen or vase water can cause fatal kidney failure.',
+    },
+  },
+  {
+    keywords: ['pothos', 'epipremnum', "devil's ivy", 'devils ivy', 'scindapsus'],
+    data: {
+      toxicToHumans: true,
+      toxicToPets: true,
+      toxicityNote: 'Calcium oxalate crystals cause oral burning and swelling in both humans and pets if chewed.',
+    },
+  },
+  {
+    keywords: ['aloe vera', 'aloe barbadensis'],
+    data: {
+      toxicToHumans: true,
+      toxicToPets: true,
+      toxicityNote: 'Saponins and anthraquinones cause vomiting/diarrhea in pets; mild GI irritation in humans if ingested.',
+    },
+  },
+  {
+    keywords: ['crassula', 'jade plant'],
+    data: {
+      toxicToHumans: false,
+      toxicToPets: true,
+      toxicityNote: 'Mildly toxic to cats and dogs — can cause vomiting, incoordination, or lethargy if chewed.',
+    },
+  },
+  {
+    keywords: ['sansevieria', 'snake plant', 'dracaena trifasciata', "mother-in-law's tongue", 'mother in law’s tongue'],
+    data: {
+      toxicToHumans: false,
+      toxicToPets: true,
+      toxicityNote: 'Mildly toxic to pets — saponins can cause drooling, vomiting, or diarrhea if chewed.',
+    },
+  },
+  {
+    keywords: ['peace lily', 'spathiphyllum'],
+    data: {
+      toxicToHumans: true,
+      toxicToPets: true,
+      toxicityNote: 'Calcium oxalate crystals cause oral burning, swelling, and drooling in humans and pets.',
+    },
+  },
+  {
+    keywords: ['basil', 'ocimum'],
+    data: { toxicToHumans: false, toxicToPets: false, toxicityNote: null },
+  },
+  {
+    keywords: ['rosemary', 'rosmarinus', 'salvia rosmarinus'],
+    data: { toxicToHumans: false, toxicToPets: false, toxicityNote: null },
+  },
+  {
+    keywords: ['mentha', 'peppermint', 'spearmint'],
+    data: { toxicToHumans: false, toxicToPets: false, toxicityNote: null },
+  },
+  {
+    keywords: ['thymus', 'thyme'],
+    data: { toxicToHumans: false, toxicToPets: false, toxicityNote: null },
+  },
+  {
+    keywords: ['echeveria'],
+    data: { toxicToHumans: false, toxicToPets: false, toxicityNote: null },
+  },
+  {
+    keywords: ['spider plant', 'chlorophytum comosum', 'chlorophytum'],
+    data: {
+      toxicToHumans: false,
+      toxicToPets: false,
+      toxicityNote: 'Contains mild compounds that can cause temporary "catnip-like" euphoria in cats, but is not dangerous.',
+    },
+  },
+];
+
+function findToxicityOverride(name: string, species: string): ToxicityOverride | null {
+  const haystack = `${name} ${species}`.toLowerCase();
+  for (const entry of TOXICITY_OVERRIDES) {
+    if (entry.keywords.some(kw => haystack.includes(kw))) return entry.data;
+  }
+  return null;
+}
+
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: CORS });
@@ -197,6 +300,14 @@ serve(async (req: Request) => {
       } else {
         parsed.toxicityNote = parsed.toxicityNote ?? claudeToxicity.toxicityNote;
       }
+    }
+
+    // Hardcoded verified data overrides both AI assessments for well-known plants.
+    const toxicityOverride = findToxicityOverride(parsed.name ?? '', parsed.species ?? '');
+    if (toxicityOverride) {
+      parsed.toxicToHumans = toxicityOverride.toxicToHumans;
+      parsed.toxicToPets   = toxicityOverride.toxicToPets;
+      parsed.toxicityNote  = toxicityOverride.toxicityNote;
     }
 
     return new Response(JSON.stringify(parsed), {
