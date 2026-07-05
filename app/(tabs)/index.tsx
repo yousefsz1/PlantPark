@@ -18,9 +18,11 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { getLevel, xpToNextLevel } from '../../lib/levels';
 import { scheduleTaskNotification, cancelPlantNotifications } from '../../lib/notifications';
-import type { Plant, CareTaskWithPlant } from '../../types/database';
+import type { Plant, CareTaskWithPlant, Space } from '../../types/database';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
+import PlantCard from '../../components/PlantCard';
+import CreateSpaceModal from '../../components/CreateSpaceModal';
 
 const DELETE_ACTION_WIDTH = 80;
 
@@ -48,12 +50,6 @@ function greetingIcon(): 'sunny-outline' | 'partly-sunny-outline' | 'moon-outlin
   if (h < 12) return 'sunny-outline';
   if (h < 17) return 'partly-sunny-outline';
   return 'moon-outline';
-}
-
-function getMood(health: number, Colors: ColorPalette): { icon: 'happy' | 'remove-circle-outline' | 'sad-outline'; color: string } {
-  if (health >= 80) return { icon: 'happy',                 color: Colors.primary };
-  if (health >= 50) return { icon: 'remove-circle-outline', color: Colors.warning };
-  return               { icon: 'sad-outline',               color: Colors.danger  };
 }
 
 const LEVEL_ICONS: Record<string, 'leaf-outline' | 'leaf' | 'flower-outline' | 'flower' | 'star-outline' | 'star' | 'ribbon' | 'trophy'> = {
@@ -164,7 +160,6 @@ function SwipeablePlantCard({
   const today = todayISO();
   const overdueCount = pendingTasks.filter(t => t.plant_id === plant.id && t.due_date < today).length;
   const displayHealth = Math.max(0, plant.health_percent - overdueCount * 10);
-  const { icon: moodIcon, color } = getMood(displayHealth, Colors);
 
   return (
     <View style={styles.swipeRow}>
@@ -188,7 +183,6 @@ function SwipeablePlantCard({
       {/* Card — slides left on swipe */}
       <Animated.View style={{ transform: [{ translateX: trans }] }} {...pan.panHandlers}>
         <TouchableOpacity
-          style={styles.plantCard}
           onPress={() => {
             if (openRef.current) { close(); return; }
             onPress();
@@ -197,30 +191,7 @@ function SwipeablePlantCard({
           delayLongPress={500}
           activeOpacity={0.82}
         >
-          {plant.photo_url ? (
-            <Image source={{ uri: plant.photo_url }} style={styles.plantPhoto} resizeMode="cover" />
-          ) : (
-            <View style={styles.plantMoodWrap}>
-              <Ionicons name={moodIcon} size={26} color={color} />
-            </View>
-          )}
-          <View style={styles.plantInfo}>
-            <View style={styles.plantRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.plantName}>{plant.name}</Text>
-                {plant.species ? <Text style={styles.plantSpecies}>{plant.species}</Text> : null}
-              </View>
-              <View style={styles.levelBadge}>
-                <Text style={styles.levelBadgeText}>Lv {plant.level}</Text>
-              </View>
-            </View>
-            <View style={styles.healthRow}>
-              <View style={styles.healthBarBg}>
-                <View style={[styles.healthBarFill, { width: `${displayHealth}%`, backgroundColor: color }]} />
-              </View>
-              <Text style={[styles.healthPct, { color }]}>{displayHealth}%</Text>
-            </View>
-          </View>
+          <PlantCard plant={plant} displayHealth={displayHealth} />
         </TouchableOpacity>
       </Animated.View>
     </View>
@@ -271,6 +242,42 @@ function MissionCard({
 }
 
 
+function SpaceCard({ space, plants, onPress }: { space: Space; plants: Plant[]; onPress: () => void }) {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
+  const spacePlants = plants.filter(p => p.space_id === space.id);
+  const thumbs = spacePlants.slice(0, 4);
+
+  return (
+    <TouchableOpacity style={styles.spaceCard} onPress={onPress} activeOpacity={0.82}>
+      <View style={styles.spaceThumbGrid}>
+        {[0, 1, 2, 3].map((i) => (
+          <View key={i} style={styles.spaceThumbTile}>
+            {thumbs[i]?.photo_url ? (
+              <Image source={{ uri: thumbs[i].photo_url! }} style={styles.spaceThumbImage} resizeMode="cover" />
+            ) : (
+              <Ionicons name="leaf-outline" size={16} color={Colors.textMuted} style={{ opacity: 0.5 }} />
+            )}
+          </View>
+        ))}
+      </View>
+      <Text style={styles.spaceName} numberOfLines={1}>{space.name}</Text>
+      <Text style={styles.spaceCount}>{spacePlants.length} plant{spacePlants.length === 1 ? '' : 's'}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function NewSpaceCard({ onPress }: { onPress: () => void }) {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
+  return (
+    <TouchableOpacity style={styles.newSpaceCard} onPress={onPress} activeOpacity={0.75}>
+      <Ionicons name="add-circle-outline" size={26} color={Colors.primary} />
+      <Text style={styles.newSpaceText}>New Space</Text>
+    </TouchableOpacity>
+  );
+}
+
 function EmptyGarden({ onAddFirst }: { onAddFirst: () => void }) {
   const { Colors, FontSize } = useTheme();
   const styles = getStyles(Colors, FontSize);
@@ -296,6 +303,7 @@ export default function GardenScreen() {
   const styles = getStyles(Colors, FontSize);
   const router = useRouter();
   const [plants, setPlants]             = useState<Plant[]>([]);
+  const [spaces, setSpaces]             = useState<Space[]>([]);
   const [pendingTasks, setPendingTasks] = useState<CareTaskWithPlant[]>([]);
   const [totalXP, setTotalXP]           = useState(0);
   const [displayName, setDisplayName]   = useState('');
@@ -304,14 +312,16 @@ export default function GardenScreen() {
   const [error, setError]               = useState<string | null>(null);
   const [completingTask, setCompletingTask] = useState<string | null>(null);
   const [deletingPlant, setDeletingPlant]   = useState<string | null>(null);
+  const [showCreateSpace, setShowCreateSpace] = useState(false);
   const hasLoaded = useRef(false);
 
   const fetchData = useCallback(async () => {
     setError(null);
     const today = todayISO();
 
-    const [plantsRes, tasksRes, profileRes, userRes] = await Promise.all([
+    const [plantsRes, spacesRes, tasksRes, profileRes, userRes] = await Promise.all([
       supabase.from('plants').select('*').order('created_at', { ascending: true }),
+      supabase.from('spaces').select('*').order('created_at', { ascending: true }),
       supabase
         .from('care_tasks')
         .select('*, plants(id, name)')
@@ -328,6 +338,7 @@ export default function GardenScreen() {
     } else {
       setPlants(plantsRes.data ?? []);
     }
+    setSpaces(spacesRes.data ?? []);
     setPendingTasks((tasksRes.data ?? []) as CareTaskWithPlant[]);
     setTotalXP(profileRes.data?.total_xp ?? 0);
 
@@ -544,6 +555,24 @@ export default function GardenScreen() {
               </>
             )}
 
+            {/* Spaces */}
+            <Text style={[styles.sectionTitle, { marginTop: Spacing.lg }]}>Spaces</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.spacesRow}
+            >
+              {spaces.map(s => (
+                <SpaceCard
+                  key={s.id}
+                  space={s}
+                  plants={plants}
+                  onPress={() => router.push(`/space/${s.id}`)}
+                />
+              ))}
+              <NewSpaceCard onPress={() => setShowCreateSpace(true)} />
+            </ScrollView>
+
             {/* Plants */}
             <Text style={[styles.sectionTitle, { marginTop: Spacing.lg }]}>Your Plants</Text>
             <Text style={styles.swipeHint}>Swipe left or long-press to delete</Text>
@@ -567,6 +596,12 @@ export default function GardenScreen() {
           <Ionicons name="add" size={28} color={Colors.textPrimary} />
         </TouchableOpacity>
       )}
+
+      <CreateSpaceModal
+        visible={showCreateSpace}
+        onClose={() => setShowCreateSpace(false)}
+        onCreated={(space) => setSpaces(prev => [...prev, space])}
+      />
     </SafeAreaView>
   );
 }
@@ -706,50 +741,50 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     borderRadius: Radius.lg,
   },
   deleteActionText: { fontSize: FontSize.xs, fontWeight: '700', color: '#FFFFFF' },
-  plantCard: {
-    flexDirection: 'row',
-    backgroundColor: Colors.card,
+
+  // Spaces
+  spacesRow: { flexDirection: 'row', gap: Spacing.sm, paddingBottom: Spacing.sm },
+  spaceCard: {
+    width: 116,
+    backgroundColor: Colors.surface,
     borderRadius: Radius.lg,
-    padding: Spacing.md,
-    gap: Spacing.md,
+    padding: Spacing.sm,
     borderWidth: 1,
     borderColor: Colors.border,
+    gap: 6,
   },
-  plantPhoto: {
-    width: 52,
-    height: 52,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.surfaceElevated,
+  spaceThumbGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    width: 96,
+    height: 96,
+    gap: 4,
   },
-  plantMoodWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: Radius.md,
+  spaceThumbTile: {
+    width: 46,
+    height: 46,
+    borderRadius: Radius.sm,
     backgroundColor: Colors.surfaceElevated,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  plantInfo: { flex: 1, gap: 6 },
-  plantRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  plantName: { fontSize: FontSize.md, fontWeight: '600', color: Colors.textPrimary },
-  plantSpecies: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: 1 },
-  levelBadge: {
-    backgroundColor: Colors.primaryDark,
-    borderRadius: Radius.full,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  levelBadgeText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.textPrimary },
-  healthRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  healthBarBg: {
-    flex: 1,
-    height: 5,
-    backgroundColor: Colors.surfaceElevated,
-    borderRadius: Radius.full,
     overflow: 'hidden',
   },
-  healthBarFill: { height: '100%', borderRadius: Radius.full },
-  healthPct: { fontSize: FontSize.xs, fontWeight: '700', minWidth: 32, textAlign: 'right' },
+  spaceThumbImage: { width: '100%', height: '100%' },
+  spaceName: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.textPrimary },
+  spaceCount: { fontSize: FontSize.xs, color: Colors.textMuted },
+  newSpaceCard: {
+    width: 116,
+    minHeight: 148,
+    borderRadius: Radius.lg,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+  },
+  newSpaceText: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.primary, textAlign: 'center' },
 
   // States
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },

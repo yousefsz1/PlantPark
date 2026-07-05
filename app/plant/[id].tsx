@@ -10,6 +10,7 @@ import {
   Image,
   Dimensions,
   Platform,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,11 +22,12 @@ import { supabase } from '../../lib/supabase';
 import { scheduleTaskNotification, cancelPlantNotifications } from '../../lib/notifications';
 import { getLevel, xpToNextLevel } from '../../lib/levels';
 import { getWateringLevel, getSunlightLevel, WATER_COLOR } from '../../lib/careLevels';
-import type { Plant, CareTask, PlantPhoto } from '../../types/database';
+import type { Plant, CareTask, PlantPhoto, Space } from '../../types/database';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import ToxicitySeverityBar from '../../components/ToxicitySeverityBar';
 import LevelBar from '../../components/LevelBar';
+import CreateSpaceModal from '../../components/CreateSpaceModal';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PHOTO_COL_SIZE = (SCREEN_WIDTH - Spacing.md * 2 - Spacing.sm * 2) / 3;
@@ -119,17 +121,20 @@ export default function PlantDetailScreen() {
   const [wateringTask, setWateringTask]   = useState<CareTask | null>(null);
   const [progressPhotos, setProgressPhotos] = useState<PlantPhoto[]>([]);
   const [totalXP, setTotalXP]             = useState(0);
+  const [spaces, setSpaces]               = useState<Space[]>([]);
   const [loading, setLoading]             = useState(true);
   const [markingWatered, setMarkingWatered] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [deleting, setDeleting]             = useState(false);
   const [addingToCalendar, setAddingToCalendar] = useState(false);
+  const [showSpacePicker, setShowSpacePicker] = useState(false);
+  const [showCreateSpace, setShowCreateSpace] = useState(false);
   const hasLoaded = useRef(false);
 
   const fetchData = useCallback(async () => {
     if (!plantId) return;
 
-    const [plantRes, taskRes, photosRes, profileRes] = await Promise.all([
+    const [plantRes, taskRes, photosRes, profileRes, spacesRes] = await Promise.all([
       supabase.from('plants').select('*').eq('id', plantId).single(),
       supabase
         .from('care_tasks')
@@ -145,12 +150,14 @@ export default function PlantDetailScreen() {
         .eq('plant_id', plantId)
         .order('created_at', { ascending: false }),
       supabase.from('profiles').select('total_xp').maybeSingle(),
+      supabase.from('spaces').select('*').order('created_at', { ascending: true }),
     ]);
 
     if (plantRes.data)  setPlant(plantRes.data);
     setWateringTask(taskRes.data?.[0] ?? null);
     setProgressPhotos((photosRes.data ?? []) as PlantPhoto[]);
     setTotalXP(profileRes.data?.total_xp ?? 0);
+    setSpaces(spacesRes.data ?? []);
   }, [plantId]);
 
   useFocusEffect(
@@ -212,6 +219,19 @@ export default function PlantDetailScreen() {
       ],
     );
   }, [plant, plantId, progressPhotos, router]);
+
+  // ── Assign Space ──────────────────────────────────────────────────────────────
+  const handleAssignSpace = useCallback(async (spaceId: string | null) => {
+    if (!plant) return;
+    try {
+      const { error } = await supabase.from('plants').update({ space_id: spaceId }).eq('id', plant.id);
+      if (error) throw error;
+      setPlant(prev => (prev ? { ...prev, space_id: spaceId } : prev));
+      setShowSpacePicker(false);
+    } catch (err) {
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to update Space');
+    }
+  }, [plant]);
 
   // ── Mark as watered ──────────────────────────────────────────────────────────
   const handleMarkWatered = useCallback(async () => {
@@ -401,6 +421,9 @@ export default function PlantDetailScreen() {
 
   const wateringLevel = getWateringLevel(wateringTask?.interval_days, plant.watering_frequency);
   const sunlightLevel = getSunlightLevel(plant.sunlight);
+  const currentSpaceName = plant.space_id
+    ? (spaces.find(s => s.id === plant.space_id)?.name ?? 'Unknown Space')
+    : 'No Space';
 
   const infoItems = [
     { icon: ICONS.waterDrop,   label: 'Watering',     value: plant.watering_frequency ? WATERING_LABELS[plant.watering_frequency] : '—', level: wateringLevel, barColor: WATER_COLOR },
@@ -481,6 +504,20 @@ export default function PlantDetailScreen() {
           <View style={styles.barTrack}>
             <View style={[styles.barFill, { width: `${plant.health_percent}%`, backgroundColor: moodColor }]} />
           </View>
+        </View>
+
+        {/* ── Space ── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Space</Text>
+          <TouchableOpacity
+            style={styles.spaceRow}
+            onPress={() => setShowSpacePicker(true)}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="location-outline" size={20} color={Colors.primary} />
+            <Text style={styles.spaceRowText}>{currentSpaceName}</Text>
+            <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+          </TouchableOpacity>
         </View>
 
         {/* ── Next watering ── */}
@@ -725,6 +762,68 @@ export default function PlantDetailScreen() {
         </View>
 
       </ScrollView>
+
+      <Modal
+        visible={showSpacePicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowSpacePicker(false)}
+      >
+        <View style={styles.backdrop}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowSpacePicker(false)}
+          />
+          <View style={styles.sheet}>
+            <View style={styles.handle} />
+            <Text style={styles.sheetTitle}>Which Space?</Text>
+            <View style={styles.spaceChipsRow}>
+              <TouchableOpacity
+                style={[styles.spaceChip, !plant.space_id && styles.spaceChipSelected]}
+                onPress={() => handleAssignSpace(null)}
+                activeOpacity={0.75}
+              >
+                <Text style={[styles.spaceChipText, !plant.space_id && styles.spaceChipTextSelected]}>
+                  No Space
+                </Text>
+              </TouchableOpacity>
+              {spaces.map((s) => {
+                const selected = plant.space_id === s.id;
+                return (
+                  <TouchableOpacity
+                    key={s.id}
+                    style={[styles.spaceChip, selected && styles.spaceChipSelected]}
+                    onPress={() => handleAssignSpace(s.id)}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.spaceChipText, selected && styles.spaceChipTextSelected]} numberOfLines={1}>
+                      {s.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+              <TouchableOpacity
+                style={styles.spaceChipNew}
+                onPress={() => setShowCreateSpace(true)}
+                activeOpacity={0.75}
+              >
+                <Ionicons name="add" size={16} color={Colors.primary} />
+                <Text style={styles.spaceChipNewText}>New Space</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <CreateSpaceModal
+        visible={showCreateSpace}
+        onClose={() => setShowCreateSpace(false)}
+        onCreated={(space) => {
+          setSpaces(prev => [...prev, space]);
+          handleAssignSpace(space.id);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -856,6 +955,67 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     letterSpacing: 1,
     marginBottom: Spacing.sm,
   },
+
+  // Space
+  spaceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  spaceRowText: { flex: 1, fontSize: FontSize.md, fontWeight: '600', color: Colors.textPrimary },
+
+  // Space picker modal
+  backdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  sheet: {
+    backgroundColor: Colors.card,
+    borderTopLeftRadius: Radius.xl,
+    borderTopRightRadius: Radius.xl,
+    padding: Spacing.lg,
+    paddingBottom: Spacing.xxl,
+    gap: Spacing.md,
+  },
+  handle: {
+    width: 40,
+    height: 4,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.border,
+    alignSelf: 'center',
+    marginBottom: Spacing.xs,
+  },
+  sheetTitle: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.textPrimary },
+  spaceChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  spaceChip: {
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  spaceChipSelected: { backgroundColor: 'rgba(46,204,113,0.15)', borderColor: Colors.primary },
+  spaceChipText: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.textSecondary },
+  spaceChipTextSelected: { color: Colors.primary },
+  spaceChipNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: Colors.primary,
+  },
+  spaceChipNewText: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.primary },
 
   // Info grid
   infoGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: Spacing.sm },

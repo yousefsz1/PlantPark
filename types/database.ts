@@ -32,6 +32,7 @@ export type Database = {
           flowering_season: string | null;
           fruiting_season: string | null;
           growing_location: 'indoor' | 'outdoor' | 'both' | null;
+          space_id: string | null;
         };
         Insert: {
           id?: string;
@@ -63,6 +64,7 @@ export type Database = {
           flowering_season?: string | null;
           fruiting_season?: string | null;
           growing_location?: 'indoor' | 'outdoor' | 'both' | null;
+          space_id?: string | null;
         };
         Update: {
           id?: string;
@@ -94,8 +96,16 @@ export type Database = {
           flowering_season?: string | null;
           fruiting_season?: string | null;
           growing_location?: 'indoor' | 'outdoor' | 'both' | null;
+          space_id?: string | null;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: 'plants_space_id_fkey';
+            columns: ['space_id'];
+            referencedRelation: 'spaces';
+            referencedColumns: ['id'];
+          },
+        ];
       };
       favourites: {
         Row: {
@@ -122,6 +132,7 @@ export type Database = {
           flowering_season: string | null;
           fruiting_season: string | null;
           growing_location: 'indoor' | 'outdoor' | 'both' | null;
+          space_id: string | null;
         };
         Insert: {
           id?: string;
@@ -147,6 +158,7 @@ export type Database = {
           flowering_season?: string | null;
           fruiting_season?: string | null;
           growing_location?: 'indoor' | 'outdoor' | 'both' | null;
+          space_id?: string | null;
         };
         Update: {
           id?: string;
@@ -172,8 +184,16 @@ export type Database = {
           flowering_season?: string | null;
           fruiting_season?: string | null;
           growing_location?: 'indoor' | 'outdoor' | 'both' | null;
+          space_id?: string | null;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: 'favourites_space_id_fkey';
+            columns: ['space_id'];
+            referencedRelation: 'spaces';
+            referencedColumns: ['id'];
+          },
+        ];
       };
       care_tasks: {
         Row: {
@@ -303,6 +323,27 @@ export type Database = {
         };
         Relationships: [];
       };
+      spaces: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          name: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          name?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -331,6 +372,7 @@ export type Database = {
 export type Plant = Database['public']['Tables']['plants']['Row'];
 export type CareTask = Database['public']['Tables']['care_tasks']['Row'];
 export type Favourite = Database['public']['Tables']['favourites']['Row'];
+export type Space = Database['public']['Tables']['spaces']['Row'];
 
 export type PlantPhoto = Database['public']['Tables']['plant_photos']['Row'];
 

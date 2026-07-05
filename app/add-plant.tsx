@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,10 +18,12 @@ import { supabase } from '../lib/supabase';
 import { requestNotificationPermission, scheduleTaskNotification, cancelPlantNotifications } from '../lib/notifications';
 import { getScanStatus, incrementScanCount } from '../lib/scanLimits';
 import { getWateringLevel, getSunlightLevel, WATER_COLOR } from '../lib/careLevels';
+import type { Space } from '../types/database';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../constants/theme';
 import { useTheme } from '../contexts/ThemeContext';
 import ToxicitySeverityBar from '../components/ToxicitySeverityBar';
 import LevelBar from '../components/LevelBar';
+import CreateSpaceModal from '../components/CreateSpaceModal';
 
 type Phase = 'capture' | 'analyzing' | 'review';
 
@@ -97,6 +99,15 @@ export default function AddPlantScreen() {
   const [favourited, setFavourited] = useState(false);
   const [favouriting, setFavouriting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [spaces, setSpaces] = useState<Space[]>([]);
+  const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
+  const [showCreateSpace, setShowCreateSpace] = useState(false);
+
+  useEffect(() => {
+    supabase.from('spaces').select('*').order('created_at', { ascending: true }).then(({ data }) => {
+      setSpaces(data ?? []);
+    });
+  }, []);
 
   const runAnalysis = useCallback(async (uri: string) => {
     const scanStatus = await getScanStatus();
@@ -225,6 +236,7 @@ export default function AddPlantScreen() {
           flowering_season: detected.flowering_season,
           fruiting_season: detected.fruiting_season,
           growing_location: detected.growing_location,
+          space_id: selectedSpaceId,
         })
         .select('id')
         .single();
@@ -270,7 +282,7 @@ export default function AddPlantScreen() {
     } finally {
       setSaving(false);
     }
-  }, [detected, router]);
+  }, [detected, router, selectedSpaceId]);
 
   const handleAddFavourite = useCallback(async () => {
     if (!detected || favourited || favouriting) return;
@@ -512,6 +524,42 @@ export default function AddPlantScreen() {
               </View>
             )}
 
+            <Text style={styles.detailsSectionLabel}>Which Space?</Text>
+            <View style={styles.spaceChipsRow}>
+              <TouchableOpacity
+                style={[styles.spaceChip, selectedSpaceId === null && styles.spaceChipSelected]}
+                onPress={() => setSelectedSpaceId(null)}
+                activeOpacity={0.75}
+              >
+                <Text style={[styles.spaceChipText, selectedSpaceId === null && styles.spaceChipTextSelected]}>
+                  No Space
+                </Text>
+              </TouchableOpacity>
+              {spaces.map((s) => {
+                const selected = selectedSpaceId === s.id;
+                return (
+                  <TouchableOpacity
+                    key={s.id}
+                    style={[styles.spaceChip, selected && styles.spaceChipSelected]}
+                    onPress={() => setSelectedSpaceId(s.id)}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.spaceChipText, selected && styles.spaceChipTextSelected]} numberOfLines={1}>
+                      {s.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+              <TouchableOpacity
+                style={styles.spaceChipNew}
+                onPress={() => setShowCreateSpace(true)}
+                activeOpacity={0.75}
+              >
+                <Ionicons name="add" size={16} color={Colors.primary} />
+                <Text style={styles.spaceChipNewText}>New Space</Text>
+              </TouchableOpacity>
+            </View>
+
             {saveError ? <Text style={styles.errorText}>{saveError}</Text> : null}
 
             <TouchableOpacity
@@ -534,6 +582,15 @@ export default function AddPlantScreen() {
             </TouchableOpacity>
           </View>
         </ScrollView>
+
+        <CreateSpaceModal
+          visible={showCreateSpace}
+          onClose={() => setShowCreateSpace(false)}
+          onCreated={(space) => {
+            setSpaces(prev => [...prev, space]);
+            setSelectedSpaceId(space.id);
+          }}
+        />
       </SafeAreaView>
     );
   }
@@ -677,6 +734,30 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
+  spaceChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  spaceChip: {
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  spaceChipSelected: { backgroundColor: 'rgba(46,204,113,0.15)', borderColor: Colors.primary },
+  spaceChipText: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.textSecondary },
+  spaceChipTextSelected: { color: Colors.primary },
+  spaceChipNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: Colors.primary,
+  },
+  spaceChipNewText: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.primary },
   toxicityRow: { flexDirection: 'row', justifyContent: 'space-between', gap: Spacing.sm },
   toxicityNote: { fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 17, marginTop: -Spacing.xs },
   careTipBox: {

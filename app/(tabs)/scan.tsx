@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,9 +18,11 @@ import { useRouter, useIsFocused } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { requestNotificationPermission, scheduleTaskNotification, cancelPlantNotifications } from '../../lib/notifications';
 import { getScanStatus, incrementScanCount } from '../../lib/scanLimits';
+import type { Space } from '../../types/database';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import ToxicitySeverityBar from '../../components/ToxicitySeverityBar';
+import CreateSpaceModal from '../../components/CreateSpaceModal';
 
 type HealthStatus = 'healthy' | 'mild' | 'serious' | 'critical';
 
@@ -117,6 +119,15 @@ export default function ScanScreen() {
   const [favourited, setFavourited]     = useState(false);
   const [favouriting, setFavouriting]   = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [spaces, setSpaces]             = useState<Space[]>([]);
+  const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
+  const [showCreateSpace, setShowCreateSpace] = useState(false);
+
+  useEffect(() => {
+    supabase.from('spaces').select('*').order('created_at', { ascending: true }).then(({ data }) => {
+      setSpaces(data ?? []);
+    });
+  }, []);
 
   const runAnalysis = useCallback(async (uri: string) => {
     const scanStatus = await getScanStatus();
@@ -303,6 +314,7 @@ export default function ScanScreen() {
           flowering_season: result.floweringSeason,
           fruiting_season: result.fruitingSeason,
           growing_location: result.growingLocation,
+          space_id: selectedSpaceId,
         })
         .select('id')
         .single();
@@ -352,7 +364,7 @@ export default function ScanScreen() {
     } finally {
       setSaving(false);
     }
-  }, [result, photoBase64, router]);
+  }, [result, photoBase64, router, selectedSpaceId]);
 
   const handleAddFavourite = useCallback(async () => {
     if (!result || favourited || favouriting) return;
@@ -634,6 +646,45 @@ export default function ScanScreen() {
             </View>
           )}
 
+          {/* Which Space? */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Which Space?</Text>
+            <View style={styles.spaceChipsRow}>
+              <TouchableOpacity
+                style={[styles.spaceChip, selectedSpaceId === null && styles.spaceChipSelected]}
+                onPress={() => setSelectedSpaceId(null)}
+                activeOpacity={0.75}
+              >
+                <Text style={[styles.spaceChipText, selectedSpaceId === null && styles.spaceChipTextSelected]}>
+                  No Space
+                </Text>
+              </TouchableOpacity>
+              {spaces.map((s) => {
+                const selected = selectedSpaceId === s.id;
+                return (
+                  <TouchableOpacity
+                    key={s.id}
+                    style={[styles.spaceChip, selected && styles.spaceChipSelected]}
+                    onPress={() => setSelectedSpaceId(s.id)}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.spaceChipText, selected && styles.spaceChipTextSelected]} numberOfLines={1}>
+                      {s.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+              <TouchableOpacity
+                style={styles.spaceChipNew}
+                onPress={() => setShowCreateSpace(true)}
+                activeOpacity={0.75}
+              >
+                <Ionicons name="add" size={16} color={Colors.primary} />
+                <Text style={styles.spaceChipNewText}>New Space</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           {/* Actions */}
           <TouchableOpacity
             style={[styles.primaryBtn, styles.saveBtn, saved && styles.saveBtnDone]}
@@ -661,6 +712,15 @@ export default function ScanScreen() {
             <Text style={styles.secondaryBtnText}>Scan Another Plant</Text>
           </TouchableOpacity>
         </ScrollView>
+
+        <CreateSpaceModal
+          visible={showCreateSpace}
+          onClose={() => setShowCreateSpace(false)}
+          onCreated={(space) => {
+            setSpaces(prev => [...prev, space]);
+            setSelectedSpaceId(space.id);
+          }}
+        />
       </SafeAreaView>
     );
   }
@@ -849,6 +909,30 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     letterSpacing: 0.8,
     marginBottom: 2,
   },
+  spaceChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.sm },
+  spaceChip: {
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  spaceChipSelected: { backgroundColor: 'rgba(46,204,113,0.15)', borderColor: Colors.primary },
+  spaceChipText: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.textSecondary },
+  spaceChipTextSelected: { color: Colors.primary },
+  spaceChipNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: Colors.primary,
+  },
+  spaceChipNewText: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.primary },
   listRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
   listIcon: { marginTop: 1 },
   listText: { flex: 1, fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 20 },
