@@ -55,6 +55,10 @@ interface ScanResult {
   floweringSeason: string;
   fruitingSeason: string;
   growingLocation: 'indoor' | 'outdoor' | 'both';
+  // AI visual health diagnosis (separate from status/healthScore above)
+  healthDiagnosisStatus: 'healthy' | 'needs_attention' | 'critical';
+  healthDiagnosisIssues: string | null;
+  healthRecommendation: string | null;
 }
 
 type Phase = 'camera' | 'analyzing' | 'result';
@@ -180,6 +184,9 @@ export default function ScanScreen() {
         home_tips: string[]; pro_tips: string[];
         max_height: string; flowering_season: string; fruiting_season: string;
         growing_location: 'indoor' | 'outdoor' | 'both';
+        health_status: 'healthy' | 'needs_attention' | 'critical';
+        health_diagnosis_issues: string | null;
+        health_recommendation: string | null;
       };
 
       setResult({
@@ -208,6 +215,9 @@ export default function ScanScreen() {
         floweringSeason: d.flowering_season,
         fruitingSeason: d.fruiting_season,
         growingLocation: d.growing_location,
+        healthDiagnosisStatus: d.health_status,
+        healthDiagnosisIssues: d.health_diagnosis_issues ?? null,
+        healthRecommendation: d.health_recommendation ?? null,
       });
       setPhase('result');
 
@@ -315,6 +325,10 @@ export default function ScanScreen() {
           fruiting_season: result.fruitingSeason,
           growing_location: result.growingLocation,
           space_id: selectedSpaceId,
+          health_status: result.healthDiagnosisStatus,
+          health_diagnosis_issues: result.healthDiagnosisIssues,
+          health_recommendation: result.healthRecommendation,
+          health_checked_at: new Date().toISOString(),
         })
         .select('id')
         .single();

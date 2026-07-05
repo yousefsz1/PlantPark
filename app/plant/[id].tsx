@@ -40,6 +40,18 @@ function getMood(health: number, Colors: ColorPalette): { icon: 'happy' | 'remov
   return               { icon: 'sad-outline',               color: Colors.danger  };
 }
 
+// AI visual health diagnosis (health_status) — separate from the mood/happiness
+// bar above, which tracks watering-adherence, not visual condition.
+type HealthDiagnosisStatus = 'healthy' | 'needs_attention' | 'critical';
+
+function getHealthStatusConfig(Colors: ColorPalette): Record<HealthDiagnosisStatus, { label: string; icon: string; color: string; bg: string }> {
+  return {
+    healthy:         { label: 'Healthy',         icon: 'checkmark-circle', color: Colors.primary, bg: 'rgba(46,204,113,0.1)' },
+    needs_attention: { label: 'Needs Attention',  icon: 'warning',          color: Colors.warning, bg: 'rgba(243,156,18,0.1)' },
+    critical:        { label: 'Critical',         icon: 'alert-circle',     color: Colors.danger,  bg: 'rgba(231,76,60,0.1)' },
+  };
+}
+
 function getWateringStatus(task: CareTask | null, Colors: ColorPalette): {
   text: string;
   color: string;
@@ -129,6 +141,7 @@ export default function PlantDetailScreen() {
   const [addingToCalendar, setAddingToCalendar] = useState(false);
   const [showSpacePicker, setShowSpacePicker] = useState(false);
   const [showCreateSpace, setShowCreateSpace] = useState(false);
+  const [checkingHealth, setCheckingHealth] = useState(false);
   const hasLoaded = useRef(false);
 
   const fetchData = useCallback(async () => {
@@ -232,6 +245,95 @@ export default function PlantDetailScreen() {
       Alert.alert('Error', err instanceof Error ? err.message : 'Failed to update Space');
     }
   }, [plant]);
+
+  // ── Re-check health ──────────────────────────────────────────────────────────
+  // Sends a fresh photo to detect-plant and updates only this plant's health
+  // diagnosis fields — never creates a new plant row or touches happiness/
+  // watering-adherence (health_percent) or the existing health_issues/
+  // health_remedies arrays from the initial scan.
+  const handleRecheckHealth = useCallback(async (uri: string) => {
+    if (!plant) return;
+    setCheckingHealth(true);
+    try {
+      const compressed = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 1024 } }],
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+      );
+
+      const { data, error } = await supabase.functions.invoke('detect-plant', {
+        body: { image: compressed.base64!, mediaType: 'image/jpeg' },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+
+      const result = data as {
+        health_status: 'healthy' | 'needs_attention' | 'critical';
+        health_diagnosis_issues: string | null;
+        health_recommendation: string | null;
+      };
+      const checkedAt = new Date().toISOString();
+
+      const { error: updateErr } = await supabase
+        .from('plants')
+        .update({
+          health_status: result.health_status,
+          health_diagnosis_issues: result.health_diagnosis_issues,
+          health_recommendation: result.health_recommendation,
+          health_checked_at: checkedAt,
+        })
+        .eq('id', plant.id);
+      if (updateErr) throw updateErr;
+
+      setPlant(prev => (prev ? {
+        ...prev,
+        health_status: result.health_status,
+        health_diagnosis_issues: result.health_diagnosis_issues,
+        health_recommendation: result.health_recommendation,
+        health_checked_at: checkedAt,
+      } : prev));
+    } catch (err) {
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to check health');
+    } finally {
+      setCheckingHealth(false);
+    }
+  }, [plant]);
+
+  const handleRecheckPress = useCallback(() => {
+    Alert.alert(
+      'Re-check Health',
+      "Take or choose a new photo of this plant for a fresh health assessment.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Take Photo',
+          onPress: async () => {
+            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permission needed', 'Camera access is required.');
+              return;
+            }
+            const result = await ImagePicker.launchCameraAsync({ quality: 1.0 });
+            if (result.canceled || !result.assets?.[0]) return;
+            handleRecheckHealth(result.assets[0].uri);
+          },
+        },
+        {
+          text: 'Choose from Library',
+          onPress: async () => {
+            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permission needed', 'Photo library access is required.');
+              return;
+            }
+            const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1.0 });
+            if (result.canceled || !result.assets?.[0]) return;
+            handleRecheckHealth(result.assets[0].uri);
+          },
+        },
+      ],
+    );
+  }, [handleRecheckHealth]);
 
   // ── Mark as watered ──────────────────────────────────────────────────────────
   const handleMarkWatered = useCallback(async () => {
@@ -424,6 +526,9 @@ export default function PlantDetailScreen() {
   const currentSpaceName = plant.space_id
     ? (spaces.find(s => s.id === plant.space_id)?.name ?? 'Unknown Space')
     : 'No Space';
+  const healthStatusConfig = plant.health_status
+    ? getHealthStatusConfig(Colors)[plant.health_status]
+    : { label: 'Not Checked Yet', icon: 'help-circle-outline', color: Colors.textMuted, bg: Colors.surfaceElevated };
 
   const infoItems = [
     { icon: ICONS.waterDrop,   label: 'Watering',     value: plant.watering_frequency ? WATERING_LABELS[plant.watering_frequency] : '—', level: wateringLevel, barColor: WATER_COLOR },
@@ -505,6 +610,22 @@ export default function PlantDetailScreen() {
             <View style={[styles.barFill, { width: `${plant.health_percent}%`, backgroundColor: moodColor }]} />
           </View>
         </View>
+
+        {/* ── Critical health alert ── */}
+        {plant.health_status === 'critical' && (
+          <View style={styles.criticalBanner}>
+            <Ionicons name="alert-circle" size={24} color="#FFFFFF" />
+            <View style={styles.criticalBannerTextWrap}>
+              <Text style={styles.criticalBannerTitle}>Critical Health Alert</Text>
+              {plant.health_diagnosis_issues ? (
+                <Text style={styles.criticalBannerText}>{plant.health_diagnosis_issues}</Text>
+              ) : null}
+              {plant.health_recommendation ? (
+                <Text style={styles.criticalBannerText}>{plant.health_recommendation}</Text>
+              ) : null}
+            </View>
+          </View>
+        )}
 
         {/* ── Space ── */}
         <View style={styles.section}>
@@ -647,6 +768,51 @@ export default function PlantDetailScreen() {
             </View>
           </View>
         ) : null}
+
+        {/* ── Health Check (AI visual diagnosis — separate from happiness %) ── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Health Check</Text>
+          <View style={[styles.healthCheckCard, { borderColor: healthStatusConfig.color, backgroundColor: healthStatusConfig.bg }]}>
+            <View style={styles.healthCheckHeader}>
+              <Ionicons name={healthStatusConfig.icon as any} size={22} color={healthStatusConfig.color} />
+              <Text style={[styles.healthCheckStatusLabel, { color: healthStatusConfig.color }]}>
+                {healthStatusConfig.label}
+              </Text>
+            </View>
+
+            {plant.health_diagnosis_issues ? (
+              <Text style={styles.healthCheckText}>{plant.health_diagnosis_issues}</Text>
+            ) : null}
+
+            {plant.health_recommendation ? (
+              <View style={styles.healthCheckRecommendationBox}>
+                <Text style={styles.healthCheckRecommendationLabel}>Recommendation</Text>
+                <Text style={styles.healthCheckText}>{plant.health_recommendation}</Text>
+              </View>
+            ) : null}
+
+            <Text style={styles.healthCheckDate}>
+              {plant.health_checked_at
+                ? `Last checked: ${new Date(plant.health_checked_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                : 'Not checked yet'}
+            </Text>
+
+            <TouchableOpacity
+              style={[styles.recheckBtn, checkingHealth && styles.disabled]}
+              onPress={handleRecheckPress}
+              disabled={checkingHealth}
+            >
+              {checkingHealth ? (
+                <ActivityIndicator size="small" color={Colors.primary} />
+              ) : (
+                <>
+                  <Ionicons name="camera-outline" size={18} color={Colors.primary} />
+                  <Text style={styles.recheckBtnText}>Re-check Health</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
 
         {/* ── Health tips & troubleshooting ── */}
         {plant.health_remedies && plant.health_remedies.length > 0 ? (() => {
@@ -1061,6 +1227,60 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     letterSpacing: 0.8,
   },
   tipBoxText: { fontSize: FontSize.sm, color: Colors.textPrimary, lineHeight: 20 },
+
+  // Critical health alert banner
+  criticalBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    marginHorizontal: Spacing.md,
+    marginTop: Spacing.md,
+    backgroundColor: Colors.danger,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+  },
+  criticalBannerTextWrap: { flex: 1, gap: 2 },
+  criticalBannerTitle: { fontSize: FontSize.md, fontWeight: '700', color: '#FFFFFF' },
+  criticalBannerText: { fontSize: FontSize.sm, color: '#FFFFFF', lineHeight: 19 },
+
+  // Health Check (AI visual diagnosis — separate from happiness % and from
+  // the existing Health Tips & Troubleshooting card below)
+  healthCheckCard: {
+    borderRadius: Radius.lg,
+    borderWidth: 1.5,
+    padding: Spacing.md,
+    gap: Spacing.sm,
+  },
+  healthCheckHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  healthCheckStatusLabel: { fontSize: FontSize.md, fontWeight: '700' },
+  healthCheckText: { fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 20 },
+  healthCheckRecommendationBox: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    padding: Spacing.sm,
+    gap: 4,
+  },
+  healthCheckRecommendationLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  healthCheckDate: { fontSize: FontSize.xs, color: Colors.textMuted },
+  recheckBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    borderRadius: Radius.full,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(46,204,113,0.06)',
+    marginTop: Spacing.xs,
+  },
+  recheckBtnText: { fontSize: FontSize.sm, fontWeight: '700', color: Colors.primary },
 
   // Health tips & troubleshooting
   healthCard: {

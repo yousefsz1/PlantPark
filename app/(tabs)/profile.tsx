@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { getScanStatus, type MembershipTier } from '../../lib/scanLimits';
+import { getLevel, xpToNextLevel } from '../../lib/levels';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import type { User } from '@supabase/supabase-js';
@@ -41,11 +42,15 @@ export default function ProfileScreen() {
   const [user, setUser] = useState<User | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [tier, setTier] = useState<MembershipTier>('free');
+  const [totalXP, setTotalXP] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
       supabase.auth.getUser().then(({ data }) => setUser(data.user));
       getScanStatus().then((status) => setTier(status?.tier ?? 'free'));
+      supabase.from('profiles').select('total_xp').maybeSingle().then(({ data }) => {
+        setTotalXP(data?.total_xp ?? 0);
+      });
     }, []),
   );
 
@@ -67,6 +72,9 @@ export default function ProfileScreen() {
   const displayEmail = user?.email ?? '—';
   const displayName = user?.user_metadata?.display_name ?? displayEmail.split('@')[0];
   const tierBadge = getTierBadgeConfig(Colors)[tier];
+  const level = getLevel(totalXP);
+  const { pct, needed } = xpToNextLevel(totalXP);
+  const isMaxLevel = needed === 0;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -79,8 +87,8 @@ export default function ProfileScreen() {
           <Text style={styles.username}>{displayName}</Text>
           <Text style={styles.userEmail}>{displayEmail}</Text>
           <View style={styles.rankBadge}>
-            <Ionicons name="leaf" size={12} color={Colors.primary} />
-            <Text style={styles.rankText}>Green Thumb • Rank 3</Text>
+            <Ionicons name={level.icon as any} size={12} color={Colors.primary} />
+            <Text style={styles.rankText}>{level.name}</Text>
           </View>
           <TouchableOpacity
             style={[styles.tierBadge, { backgroundColor: tierBadge.bg }]}
@@ -95,11 +103,13 @@ export default function ProfileScreen() {
         {/* XP progress */}
         <View style={styles.xpCard}>
           <View style={styles.xpRow}>
-            <Text style={styles.xpLabel}>1,140 XP</Text>
-            <Text style={styles.xpNext}>Next rank at 2,000 XP</Text>
+            <Text style={styles.xpLabel}>{totalXP.toLocaleString()} XP</Text>
+            <Text style={styles.xpNext}>
+              {isMaxLevel ? 'Max level reached!' : `Next rank at ${(totalXP + needed).toLocaleString()} XP`}
+            </Text>
           </View>
           <View style={styles.xpBarBg}>
-            <View style={[styles.xpBarFill, { width: '57%' }]} />
+            <View style={[styles.xpBarFill, { width: `${pct}%` }]} />
           </View>
         </View>
 

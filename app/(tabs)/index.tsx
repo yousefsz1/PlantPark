@@ -52,17 +52,6 @@ function greetingIcon(): 'sunny-outline' | 'partly-sunny-outline' | 'moon-outlin
   return 'moon-outline';
 }
 
-const LEVEL_ICONS: Record<string, 'leaf-outline' | 'leaf' | 'flower-outline' | 'flower' | 'star-outline' | 'star' | 'ribbon' | 'trophy'> = {
-  'Seedling':         'leaf-outline',
-  'Sprout':           'leaf',
-  'Grower':           'flower-outline',
-  'Budding Gardener': 'flower',
-  'Green Thumb':      'star-outline',
-  'Bloom Keeper':     'star',
-  'Garden Sage':      'ribbon',
-  'Master Gardener':  'trophy',
-};
-
 function extractStoragePath(publicUrl: string): string | null {
   const marker = '/plant-images/';
   const idx = publicUrl.indexOf(marker);
@@ -94,7 +83,7 @@ function LevelBar({ totalXP }: { totalXP: number }) {
     <View style={styles.levelBar}>
       <View style={styles.levelBarRow}>
         <View style={styles.levelNameRow}>
-          <Ionicons name={LEVEL_ICONS[level.name] ?? 'leaf'} size={15} color={Colors.textPrimary} />
+          <Ionicons name={level.icon as any} size={15} color={Colors.textPrimary} />
           <Text style={styles.levelName}>{level.name}</Text>
         </View>
         <Text style={styles.levelXP}>{totalXP.toLocaleString()} XP</Text>

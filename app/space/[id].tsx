@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
   TextInput,
   Modal,
   Image,
+  Animated,
+  PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +21,92 @@ import type { Space, Plant } from '../../types/database';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import PlantCard from '../../components/PlantCard';
+
+// Wider than the Garden screen's 80px delete action to fit the "Remove from [Space]" label
+const DELETE_ACTION_WIDTH = 104;
+
+function SwipeableSpacePlantRow({
+  plant,
+  spaceName,
+  removing,
+  onPress,
+  onRemove,
+}: {
+  plant: Plant;
+  spaceName: string;
+  removing: boolean;
+  onPress: () => void;
+  onRemove: () => void;
+}) {
+  const { Colors, FontSize } = useTheme();
+  const styles = getStyles(Colors, FontSize);
+  const trans = useRef(new Animated.Value(0)).current;
+  const openRef = useRef(false);
+
+  const springTo = (val: number) =>
+    Animated.spring(trans, { toValue: val, useNativeDriver: true, bounciness: 0, speed: 20 }).start();
+
+  const close = useCallback(() => {
+    openRef.current = false;
+    springTo(0);
+  }, []);
+
+  const pan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+      onPanResponderMove: (_, g) => {
+        const base = openRef.current ? -DELETE_ACTION_WIDTH : 0;
+        trans.setValue(Math.max(-DELETE_ACTION_WIDTH, Math.min(0, base + g.dx)));
+      },
+      onPanResponderRelease: (_, g) => {
+        const base = openRef.current ? -DELETE_ACTION_WIDTH : 0;
+        const final = Math.max(-DELETE_ACTION_WIDTH, Math.min(0, base + g.dx));
+        if (final < -(DELETE_ACTION_WIDTH / 2)) {
+          openRef.current = true;
+          springTo(-DELETE_ACTION_WIDTH);
+        } else {
+          openRef.current = false;
+          springTo(0);
+        }
+      },
+    })
+  ).current;
+
+  return (
+    <View style={styles.swipeRow}>
+      {/* Remove-from-Space action revealed on swipe-left */}
+      <TouchableOpacity
+        style={[styles.removeAction, removing && { opacity: 0.6 }]}
+        onPress={() => { close(); onRemove(); }}
+        activeOpacity={0.85}
+        disabled={removing}
+      >
+        {removing ? (
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        ) : (
+          <>
+            <Ionicons name="exit-outline" size={18} color="#FFFFFF" />
+            <Text style={styles.removeActionText} numberOfLines={2}>Remove from {spaceName}</Text>
+          </>
+        )}
+      </TouchableOpacity>
+
+      {/* Card — slides left on swipe */}
+      <Animated.View style={{ transform: [{ translateX: trans }] }} {...pan.panHandlers}>
+        <TouchableOpacity
+          onPress={() => {
+            if (openRef.current) { close(); return; }
+            onPress();
+          }}
+          activeOpacity={0.82}
+        >
+          <PlantCard plant={plant} />
+        </TouchableOpacity>
+      </Animated.View>
+    </View>
+  );
+}
 
 export default function SpaceDetailScreen() {
   const { Colors, FontSize } = useTheme();
@@ -36,6 +124,8 @@ export default function SpaceDetailScreen() {
   const [savingName, setSavingName] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     if (!spaceId) return;
@@ -71,6 +161,35 @@ export default function SpaceDetailScreen() {
     }
   }, [spaceId]);
 
+  const handleRemoveFromSpace = useCallback((plant: Plant) => {
+    if (!space) return;
+    Alert.alert(
+      `Remove ${plant.name} from ${space.name}?`,
+      "It will stay in Your Plants — this only unassigns it from this Space.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            setRemovingId(plant.id);
+            try {
+              const { error } = await supabase.from('plants').update({ space_id: null }).eq('id', plant.id);
+              if (error) throw error;
+              setAllPlants(prev => prev.map(p => (p.id === plant.id ? { ...p, space_id: null } : p)));
+              setToastMessage(`Removed from ${space.name} — still in Your Plants`);
+              setTimeout(() => setToastMessage(null), 2200);
+            } catch (err) {
+              Alert.alert('Error', err instanceof Error ? err.message : 'Failed to remove plant from Space');
+            } finally {
+              setRemovingId(null);
+            }
+          },
+        },
+      ],
+    );
+  }, [space]);
+
   const startRename = useCallback(() => {
     if (!space) return;
     setNameInput(space.name);
@@ -97,9 +216,17 @@ export default function SpaceDetailScreen() {
 
   const handleDelete = useCallback(() => {
     if (!space) return;
+    if (plants.length > 0) {
+      Alert.alert(
+        'Space not empty',
+        `This Space has ${plants.length} plant${plants.length === 1 ? '' : 's'} in it. Remove all plants from this Space before deleting it.`,
+        [{ text: 'OK' }],
+      );
+      return;
+    }
     Alert.alert(
       `Delete ${space.name}?`,
-      "This won't delete the plants inside it — they'll just be unassigned from this Space.",
+      "This can't be undone.",
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -119,7 +246,7 @@ export default function SpaceDetailScreen() {
         },
       ],
     );
-  }, [space, router]);
+  }, [space, plants.length, router]);
 
   if (loading) {
     return (
@@ -200,6 +327,13 @@ export default function SpaceDetailScreen() {
           {plants.length} plant{plants.length === 1 ? '' : 's'} in this Space
         </Text>
 
+        {toastMessage ? (
+          <View style={styles.toast}>
+            <Ionicons name="checkmark-circle" size={15} color={Colors.primary} />
+            <Text style={styles.toastText}>{toastMessage}</Text>
+          </View>
+        ) : null}
+
         {plants.length === 0 ? (
           <View style={styles.emptyBox}>
             <Ionicons name="leaf-outline" size={40} color={Colors.textMuted} style={{ opacity: 0.6 }} />
@@ -207,14 +341,14 @@ export default function SpaceDetailScreen() {
           </View>
         ) : (
           plants.map(p => (
-            <TouchableOpacity
+            <SwipeableSpacePlantRow
               key={p.id}
-              style={styles.plantRowWrap}
+              plant={p}
+              spaceName={space.name}
+              removing={removingId === p.id}
               onPress={() => router.push(`/plant/${p.id}`)}
-              activeOpacity={0.82}
-            >
-              <PlantCard plant={p} />
-            </TouchableOpacity>
+              onRemove={() => handleRemoveFromSpace(p)}
+            />
           ))
         )}
       </ScrollView>
@@ -333,7 +467,42 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
       color: Colors.textMuted,
       marginBottom: Spacing.sm,
     },
-    plantRowWrap: { marginBottom: Spacing.sm },
+
+    toast: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'center',
+      gap: 6,
+      backgroundColor: Colors.surfaceElevated,
+      borderWidth: 1,
+      borderColor: Colors.primary,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
+      borderRadius: Radius.full,
+      marginBottom: Spacing.sm,
+    },
+    toastText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.textPrimary },
+
+    swipeRow: {
+      marginBottom: Spacing.sm,
+      position: 'relative',
+      overflow: 'hidden',
+      borderRadius: Radius.lg,
+    },
+    removeAction: {
+      position: 'absolute',
+      right: 0,
+      top: 0,
+      bottom: 0,
+      width: DELETE_ACTION_WIDTH,
+      backgroundColor: Colors.danger,
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: Spacing.xs,
+      borderRadius: Radius.lg,
+    },
+    removeActionText: { fontSize: FontSize.xs, fontWeight: '700', color: '#FFFFFF', textAlign: 'center' },
 
     emptyBox: {
       alignItems: 'center',

@@ -33,6 +33,10 @@ export type Database = {
           fruiting_season: string | null;
           growing_location: 'indoor' | 'outdoor' | 'both' | null;
           space_id: string | null;
+          health_status: 'healthy' | 'needs_attention' | 'critical' | null;
+          health_diagnosis_issues: string | null;
+          health_recommendation: string | null;
+          health_checked_at: string | null;
         };
         Insert: {
           id?: string;
@@ -65,6 +69,10 @@ export type Database = {
           fruiting_season?: string | null;
           growing_location?: 'indoor' | 'outdoor' | 'both' | null;
           space_id?: string | null;
+          health_status?: 'healthy' | 'needs_attention' | 'critical' | null;
+          health_diagnosis_issues?: string | null;
+          health_recommendation?: string | null;
+          health_checked_at?: string | null;
         };
         Update: {
           id?: string;
@@ -97,6 +105,10 @@ export type Database = {
           fruiting_season?: string | null;
           growing_location?: 'indoor' | 'outdoor' | 'both' | null;
           space_id?: string | null;
+          health_status?: 'healthy' | 'needs_attention' | 'critical' | null;
+          health_diagnosis_issues?: string | null;
+          health_recommendation?: string | null;
+          health_checked_at?: string | null;
         };
         Relationships: [
           {
@@ -133,6 +145,10 @@ export type Database = {
           fruiting_season: string | null;
           growing_location: 'indoor' | 'outdoor' | 'both' | null;
           space_id: string | null;
+          health_status: 'healthy' | 'needs_attention' | 'critical' | null;
+          health_diagnosis_issues: string | null;
+          health_recommendation: string | null;
+          health_checked_at: string | null;
         };
         Insert: {
           id?: string;
@@ -159,6 +175,10 @@ export type Database = {
           fruiting_season?: string | null;
           growing_location?: 'indoor' | 'outdoor' | 'both' | null;
           space_id?: string | null;
+          health_status?: 'healthy' | 'needs_attention' | 'critical' | null;
+          health_diagnosis_issues?: string | null;
+          health_recommendation?: string | null;
+          health_checked_at?: string | null;
         };
         Update: {
           id?: string;
@@ -185,6 +205,10 @@ export type Database = {
           fruiting_season?: string | null;
           growing_location?: 'indoor' | 'outdoor' | 'both' | null;
           space_id?: string | null;
+          health_status?: 'healthy' | 'needs_attention' | 'critical' | null;
+          health_diagnosis_issues?: string | null;
+          health_recommendation?: string | null;
+          health_checked_at?: string | null;
         };
         Relationships: [
           {
@@ -381,7 +405,7 @@ export type CareTaskWithPlant = CareTask & {
 };
 
 export type CareTaskWithPlantPhoto = CareTask & {
-  plants: { id: string; name: string; photo_url: string | null } | null;
+  plants: { id: string; name: string; photo_url: string | null; space_id: string | null } | null;
 };
 
 export type JournalEntry = Database['public']['Tables']['journal_entries']['Row'];

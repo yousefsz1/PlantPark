@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
-import type { CareTaskWithPlantPhoto } from '../../types/database';
+import type { CareTaskWithPlantPhoto, Space } from '../../types/database';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 
@@ -81,17 +81,22 @@ export default function ScheduleScreen() {
   const styles = getStyles(Colors, FontSize);
   const router = useRouter();
   const [tasks, setTasks]           = useState<CareTaskWithPlantPhoto[]>([]);
+  const [spaces, setSpaces]         = useState<Space[]>([]);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const hasLoaded = useRef(false);
 
   const fetchTasks = useCallback(async () => {
-    const { data } = await supabase
-      .from('care_tasks')
-      .select('*, plants(id, name, photo_url)')
-      .is('completed_at', null)
-      .order('due_date', { ascending: true });
-    setTasks((data ?? []) as CareTaskWithPlantPhoto[]);
+    const [tasksRes, spacesRes] = await Promise.all([
+      supabase
+        .from('care_tasks')
+        .select('*, plants(id, name, photo_url, space_id)')
+        .is('completed_at', null)
+        .order('due_date', { ascending: true }),
+      supabase.from('spaces').select('*'),
+    ]);
+    setTasks((tasksRes.data ?? []) as CareTaskWithPlantPhoto[]);
+    setSpaces(spacesRes.data ?? []);
   }, []);
 
   useFocusEffect(
@@ -147,6 +152,9 @@ export default function ScheduleScreen() {
               <Text style={styles.dateLabel}>{group.label}</Text>
               {group.tasks.map(task => {
                 const cfg = TASK_CONFIG[task.task_type] ?? TASK_CONFIG.watering;
+                const spaceName = task.plants?.space_id
+                  ? spaces.find(s => s.id === task.plants!.space_id)?.name
+                  : undefined;
 
                 return (
                   <TouchableOpacity
@@ -180,7 +188,9 @@ export default function ScheduleScreen() {
                       <Text style={styles.taskMessage}>
                         {cfg.label} {task.plants?.name ?? 'plant'}
                       </Text>
-                      <Text style={styles.taskDueDate}>{formatDueDate(task.due_date)}</Text>
+                      <Text style={styles.taskDueDate}>
+                        {formatDueDate(task.due_date)}{spaceName ? ` · ${spaceName}` : ''}
+                      </Text>
                     </View>
 
                     {/* Right: XP badge */}

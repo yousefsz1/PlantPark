@@ -40,7 +40,10 @@ const SYSTEM_PROMPT = `You are an expert botanist and plant care specialist. Ide
     Must be consistent: isHealthy true → healthScore ≥ 70; isHealthy false → healthScore < 70>,
   "healthIssues": [<string> — list visible problems e.g. "Yellow leaves", "Brown leaf tips", "Signs of pests", "Wilting stems". Empty array [] if healthy.],
   "home_tips": [<string> — exactly 2-3 simple, everyday household remedies or prevention tips written for a total beginner, max 110 chars each, plain non-technical language (avoid jargon like "pH", "N-P-K", "nitrogen ratio"). Prefix each with ONE emoji from this fixed, well-supported set only: ☕ (coffee grounds) 🥛 (milk) 🥚 (eggshells) 🍌 (banana peel) 🧴 (spray/liquid application) 🌿 (cinnamon/general plant remedy) 💧 (water/misting) 🌞 (light/sunlight) 🪴 (general potting/soil tip). Never use any emoji outside this set. Omit the emoji prefix only if none of these fit (e.g. "Rotate pot weekly for even light exposure").],
-  "pro_tips": [<string> — exactly 1-2 more technical, horticultural remedies for an experienced grower, max 150 chars each, e.g. soil pH adjustment, drainage fixes, specific fertilizer N-P-K ratios. Plain text, no emoji prefix.]
+  "pro_tips": [<string> — exactly 1-2 more technical, horticultural remedies for an experienced grower, max 150 chars each, e.g. soil pH adjustment, drainage fixes, specific fertilizer N-P-K ratios. Plain text, no emoji prefix.],
+  "healthStatus": "healthy" | "needs_attention" | "critical",
+  "healthDiagnosisIssues": <string or null — ONE or TWO plain-language sentences describing visible signs of ill health you can see in THIS photo: discoloration, spots, wilting, pest damage, leaf drop, necrosis, etc, e.g. "Yellowing on lower leaves, some leaf drop." Null if healthStatus is "healthy".>,
+  "healthRecommendation": <string or null — ONE actionable suggested next step addressing the specific issue observed, e.g. "Reduce watering frequency and check for root rot." Null if healthStatus is "healthy".>
 }
 
 Rules:
@@ -62,6 +65,8 @@ Rules:
 - Do not exceed the max character length for each field — keep every entry concise enough to fit the limit
 - Emoji prefixes in home_tips must come ONLY from the approved set listed above (☕ 🥛 🥚 🍌 🧴 🌿 💧 🌞 🪴) — never use any other emoji, even if it seems relevant, to avoid rendering issues on some devices
 - pro_tips must never include an emoji prefix — plain technical text only
+- healthStatus is a SEPARATE, independent visual diagnosis from healthScore/isHealthy above — be conservative: "critical" is reserved ONLY for genuinely severe, obvious visual distress (e.g. widespread necrosis, the plant appears to be dying, severe pest infestation, extensive wilting across most of the plant) — never for minor cosmetic imperfections. Use "needs_attention" for real but moderate issues (some yellowing, minor pest signs, a few wilting leaves) worth the owner's attention. Use "healthy" when the plant shows no significant visual problems. healthStatus should broadly agree with healthScore/isHealthy (e.g. don't return "critical" alongside a healthScore above 40), but is graded on its own 3-tier scale, not derived by formula from healthScore.
+- healthDiagnosisIssues and healthRecommendation must both be null when healthStatus is "healthy" — never invent an issue or recommendation for a healthy-looking plant
 - Use real, well-established toxicity knowledge for common houseplants/garden plants (e.g. lilies toxic to cats, pothos toxic to both humans and pets, basil safe for both) — be accurate, not speculative
 - If you are not confident about a plant's toxicity, default toxicToHumans and toxicToPets to true (safer default) rather than guessing false
 - humanSeverity and petSeverity must be consistent with toxicToHumans/toxicToPets: if toxicToHumans is false, humanSeverity must be 0; if true, humanSeverity must be 1-5 matching the actual severity. Same rule for toxicToPets/petSeverity.
@@ -421,6 +426,17 @@ serve(async (req: Request) => {
     delete parsed.floweringSeason;
     delete parsed.fruitingSeason;
     delete parsed.growingLocation;
+
+    // Expose the new AI visual health diagnosis fields under the snake_case
+    // names matching the health_status/health_diagnosis_issues/
+    // health_recommendation DB columns — a separate, independently
+    // re-checkable system from healthScore/isHealthy/healthIssues above.
+    parsed.health_status            = parsed.healthStatus;
+    parsed.health_diagnosis_issues  = parsed.healthDiagnosisIssues ?? null;
+    parsed.health_recommendation    = parsed.healthRecommendation ?? null;
+    delete parsed.healthStatus;
+    delete parsed.healthDiagnosisIssues;
+    delete parsed.healthRecommendation;
 
     return new Response(JSON.stringify(parsed), {
       headers: { ...CORS, 'Content-Type': 'application/json' },

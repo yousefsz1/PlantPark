@@ -1,19 +1,22 @@
 export type Level = {
   name: string;
   emoji: string;
+  // Ionicons glyph name — used instead of `emoji` for on-screen rendering,
+  // since Apple Color Emoji renders incompletely on iOS Simulator.
+  icon: string;
   minXP: number;
   maxXP: number;
 };
 
 export const LEVELS: Level[] = [
-  { name: 'Seedling',        emoji: '🌱', minXP: 0,    maxXP: 99   },
-  { name: 'Sprout',          emoji: '🌿', minXP: 100,  maxXP: 299  },
-  { name: 'Grower',          emoji: '🪴', minXP: 300,  maxXP: 599  },
-  { name: 'Budding Gardener', emoji: '🌷', minXP: 600,  maxXP: 999  },
-  { name: 'Green Thumb',     emoji: '🌳', minXP: 1000, maxXP: 1499 },
-  { name: 'Bloom Keeper',    emoji: '🌸', minXP: 1500, maxXP: 2099 },
-  { name: 'Garden Sage',     emoji: '🧙', minXP: 2100, maxXP: 2799 },
-  { name: 'Master Gardener', emoji: '🏆', minXP: 2800, maxXP: Infinity },
+  { name: 'Seedling',         emoji: '🌱', icon: 'leaf-outline',   minXP: 0,    maxXP: 99   },
+  { name: 'Sprout',           emoji: '🌿', icon: 'leaf',           minXP: 100,  maxXP: 299  },
+  { name: 'Grower',           emoji: '🪴', icon: 'flower-outline', minXP: 300,  maxXP: 599  },
+  { name: 'Budding Gardener', emoji: '🌷', icon: 'flower',         minXP: 600,  maxXP: 999  },
+  { name: 'Green Thumb',      emoji: '🌳', icon: 'rose-outline',   minXP: 1000, maxXP: 1499 },
+  { name: 'Bloom Keeper',     emoji: '🌸', icon: 'rose',           minXP: 1500, maxXP: 2099 },
+  { name: 'Garden Sage',      emoji: '🧙', icon: 'color-wand',     minXP: 2100, maxXP: 2799 },
+  { name: 'Master Gardener',  emoji: '🏆', icon: 'trophy',         minXP: 2800, maxXP: Infinity },
 ];
 
 export function getLevel(totalXP: number): Level {

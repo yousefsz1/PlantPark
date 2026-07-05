@@ -52,6 +52,9 @@ interface DetectedPlant {
   flowering_season: string;
   fruiting_season: string;
   growing_location: 'indoor' | 'outdoor' | 'both';
+  health_status: 'healthy' | 'needs_attention' | 'critical';
+  health_diagnosis_issues: string | null;
+  health_recommendation: string | null;
 }
 
 const SUNLIGHT_LABELS: Record<string, string> = {
@@ -237,6 +240,10 @@ export default function AddPlantScreen() {
           fruiting_season: detected.fruiting_season,
           growing_location: detected.growing_location,
           space_id: selectedSpaceId,
+          health_status: detected.health_status,
+          health_diagnosis_issues: detected.health_diagnosis_issues,
+          health_recommendation: detected.health_recommendation,
+          health_checked_at: new Date().toISOString(),
         })
         .select('id')
         .single();
