@@ -30,6 +30,25 @@ const WATERING_LABELS: Record<string, string> = {
   monthly: 'Monthly',
 };
 
+const GROWING_LOCATION_LABELS: Record<string, string> = {
+  indoor: 'Indoor',
+  outdoor: 'Outdoor',
+  both: 'Both',
+};
+
+const ICONS = {
+  waterDrop:     require('../../assets/icons/water_drop.png'),
+  sun:           require('../../assets/icons/sun.png'),
+  seedling:      require('../../assets/icons/seedling.png'),
+  thermometer:   require('../../assets/icons/thermometer.png'),
+  ruler:         require('../../assets/icons/ruler.png'),
+  cherryBlossom: require('../../assets/icons/cherry_blossom.png'),
+  redApple:      require('../../assets/icons/red_apple.png'),
+  house:         require('../../assets/icons/house.png'),
+  warning:          require('../../assets/icons/warning.png'),
+  catFace:          require('../../assets/icons/cat_face.png'),
+} as const;
+
 export default function FavouriteDetailScreen() {
   const { Colors, FontSize } = useTheme();
   const styles = getStyles(Colors, FontSize);
@@ -97,10 +116,17 @@ export default function FavouriteDetailScreen() {
 
   const hasProTips = (favourite.health_tips_pro?.length ?? 0) > 0;
   const infoItems = [
-    { icon: 'water-outline',       label: 'Watering',    value: favourite.watering_frequency ? (WATERING_LABELS[favourite.watering_frequency] ?? favourite.watering_frequency) : '—' },
-    { icon: 'sunny-outline',       label: 'Sunlight',    value: favourite.sunlight ? (SUNLIGHT_LABELS[favourite.sunlight] ?? favourite.sunlight) : '—' },
-    { icon: 'earth-outline',       label: 'Soil',        value: favourite.soil_type ?? '—' },
-    { icon: 'thermometer-outline', label: 'Temperature', value: favourite.temperature ?? '—' },
+    { icon: ICONS.waterDrop,   label: 'Watering',    value: favourite.watering_frequency ? (WATERING_LABELS[favourite.watering_frequency] ?? favourite.watering_frequency) : '—' },
+    { icon: ICONS.sun,         label: 'Sunlight',    value: favourite.sunlight ? (SUNLIGHT_LABELS[favourite.sunlight] ?? favourite.sunlight) : '—' },
+    { icon: ICONS.seedling,    label: 'Soil',        value: favourite.soil_type ?? '—' },
+    { icon: ICONS.thermometer, label: 'Temperature', value: favourite.temperature ?? '—' },
+  ] as const;
+
+  const detailItems = [
+    { icon: ICONS.ruler,         label: 'Max Height',       value: favourite.max_height ?? '—',                                                    muted: false },
+    { icon: ICONS.cherryBlossom, label: 'Flowering Season', value: favourite.flowering_season === 'N/A' ? 'Not applicable' : (favourite.flowering_season ?? '—'), muted: favourite.flowering_season === 'N/A' },
+    { icon: ICONS.redApple,      label: 'Fruiting Season',  value: favourite.fruiting_season === 'N/A' ? 'Not applicable' : (favourite.fruiting_season ?? '—'),   muted: favourite.fruiting_season === 'N/A' },
+    { icon: ICONS.house,         label: 'Suitability',      value: favourite.growing_location ? (GROWING_LOCATION_LABELS[favourite.growing_location] ?? favourite.growing_location) : '—', muted: false },
   ] as const;
 
   return (
@@ -142,8 +168,8 @@ export default function FavouriteDetailScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Toxicity</Text>
             <View style={styles.toxicityRow}>
-              <ToxicitySeverityBar label="Humans" icon="body-outline" severity={favourite.human_toxicity_severity ?? 0} />
-              <ToxicitySeverityBar label="Pets" icon="paw" severity={favourite.pet_toxicity_severity ?? 0} />
+              <ToxicitySeverityBar label="Humans" icon={ICONS.warning} severity={favourite.human_toxicity_severity ?? 0} />
+              <ToxicitySeverityBar label="Pets" icon={ICONS.catFace} severity={favourite.pet_toxicity_severity ?? 0} />
             </View>
             {favourite.toxicity_note && (
               <Text style={styles.toxicityNote}>{favourite.toxicity_note}</Text>
@@ -151,13 +177,27 @@ export default function FavouriteDetailScreen() {
           </View>
         )}
 
+        {/* ── Plant details ── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Plant Details</Text>
+          <View style={styles.infoGrid}>
+            {detailItems.map(({ icon, label, value, muted }) => (
+              <View key={label} style={styles.infoItem}>
+                <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
+                <Text style={styles.infoLabel}>{label}</Text>
+                <Text style={[styles.infoValue, muted && styles.infoValueMuted]} numberOfLines={2}>{value}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+
         {/* ── Care requirements ── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Care Requirements</Text>
           <View style={styles.infoGrid}>
             {infoItems.map(({ icon, label, value }) => (
               <View key={label} style={styles.infoItem}>
-                <Ionicons name={icon as any} size={20} color={Colors.primary} />
+                <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
                 <Text style={styles.infoLabel}>{label}</Text>
                 <Text style={styles.infoValue} numberOfLines={2}>{value}</Text>
               </View>
@@ -308,6 +348,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   infoItem: {
     width: '47%',
+    minHeight: 104,
     backgroundColor: Colors.surface,
     borderRadius: Radius.md,
     padding: Spacing.md,
@@ -315,6 +356,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     borderWidth: 1,
     borderColor: Colors.border,
   },
+  infoIcon: { width: 20, height: 20 },
   infoLabel: {
     fontSize: FontSize.xs,
     color: Colors.textMuted,
@@ -323,6 +365,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     marginTop: 4,
   },
   infoValue: { fontSize: FontSize.sm, color: Colors.textPrimary, fontWeight: '600' },
+  infoValueMuted: { color: Colors.textMuted },
 
   // Care tip
   tipBox: {

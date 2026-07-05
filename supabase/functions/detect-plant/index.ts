@@ -18,6 +18,10 @@ const SYSTEM_PROMPT = `You are an expert botanist and plant care specialist. Ide
   "sunlight": "low" | "medium" | "bright",
   "soilType": "Brief soil description, max 50 chars",
   "temperature": "Ideal range e.g. 65-80°F / 18-27°C",
+  "maxHeight": "<string — typical maximum height for this species at maturity, e.g. '60-100 cm' or '2-3 meters'. Use your best botanical judgement for a realistic typical range.>",
+  "floweringSeason": "<string — typical flowering season/months, e.g. 'Spring (March-May)'. Return exactly the string \"N/A\" if this plant doesn't flower or flowering isn't a relevant/observable trait for it (e.g. most foliage houseplants).>",
+  "fruitingSeason": "<string — typical fruiting season/months, e.g. 'Summer (June-August)'. Return exactly the string \"N/A\" if this plant doesn't produce fruit — this applies to most houseplants and foliage plants.>",
+  "growingLocation": "indoor" | "outdoor" | "both",
   "careTip": "One actionable tip specific to this plant, max 100 chars",
   "fertilizingDays": <number — fertilizing interval in days>,
   "mistingDays": <number or null — misting interval in days, null if not needed>,
@@ -43,6 +47,10 @@ Rules:
 - wateringFrequency: "daily" = every 1-3 days, "weekly" = every 4-14 days, "monthly" = 15+ days
 - wateringDays must match wateringFrequency (e.g. "weekly" with 7 days is valid)
 - sunlight: "low" = shade-tolerant, "medium" = indirect light, "bright" = direct/strong indirect
+- maxHeight must always be an actual value — never "N/A" or null — since every plant has some typical mature size; give your best estimate even if the species is uncommon
+- floweringSeason must be "N/A" (exact string, not null) whenever the plant does not flower or flowering is not a normally observable/relevant trait for it — do not invent a season for non-flowering foliage plants. Only give an actual season/month range when the plant genuinely, typically flowers.
+- fruitingSeason must be "N/A" (exact string, not null) for the large majority of houseplants and foliage plants that don't produce fruit — only give an actual season/month range for plants that genuinely, typically fruit (e.g. citrus, tomato, strawberry)
+- growingLocation must be exactly one of "indoor", "outdoor", or "both" — "indoor" for plants typically kept as houseplants, "outdoor" for plants that need outdoor garden/patio conditions to thrive, "both" for plants commonly grown successfully in either setting
 - healthScore must reflect what you actually see in the photo — do not default to 100 if there are visible issues
 - If isHealthy is true: healthIssues must be [] and home_tips should be 2-3 general beginner-friendly prevention tips, pro_tips should be 1-2 general advanced-care tips
 - If isHealthy is false: healthIssues lists 1-3 visible problems; home_tips must address the visible issues with beginner-friendly fixes; pro_tips may offer more advanced, technical fixes for the same issues
@@ -402,6 +410,17 @@ serve(async (req: Request) => {
     parsed.pet_toxicity_severity   = parsed.petSeverity;
     delete parsed.humanSeverity;
     delete parsed.petSeverity;
+
+    // Expose the new plant-characteristic fields under the snake_case field
+    // names the client expects, matching the convention above.
+    parsed.max_height       = parsed.maxHeight;
+    parsed.flowering_season = parsed.floweringSeason;
+    parsed.fruiting_season  = parsed.fruitingSeason;
+    parsed.growing_location = parsed.growingLocation;
+    delete parsed.maxHeight;
+    delete parsed.floweringSeason;
+    delete parsed.fruitingSeason;
+    delete parsed.growingLocation;
 
     return new Response(JSON.stringify(parsed), {
       headers: { ...CORS, 'Content-Type': 'application/json' },

@@ -47,6 +47,11 @@ interface ScanResult {
   healthIssues: string[];
   homeTips: string[];
   proTips: string[];
+  // Plant characteristics
+  maxHeight: string;
+  floweringSeason: string;
+  fruitingSeason: string;
+  growingLocation: 'indoor' | 'outdoor' | 'both';
 }
 
 type Phase = 'camera' | 'analyzing' | 'result';
@@ -59,6 +64,25 @@ function getStatusConfig(Colors: ColorPalette): Record<HealthStatus, { label: st
     critical: { label: 'Critical', color: Colors.danger,  bg: '#2E0808' },
   };
 }
+
+const GROWING_LOCATION_LABELS: Record<string, string> = {
+  indoor: 'Indoor',
+  outdoor: 'Outdoor',
+  both: 'Both',
+};
+
+const ICONS = {
+  waterDrop:     require('../../assets/icons/water_drop.png'),
+  sun:           require('../../assets/icons/sun.png'),
+  seedling:      require('../../assets/icons/seedling.png'),
+  thermometer:   require('../../assets/icons/thermometer.png'),
+  ruler:         require('../../assets/icons/ruler.png'),
+  cherryBlossom: require('../../assets/icons/cherry_blossom.png'),
+  redApple:      require('../../assets/icons/red_apple.png'),
+  house:         require('../../assets/icons/house.png'),
+  warning:          require('../../assets/icons/warning.png'),
+  catFace:          require('../../assets/icons/cat_face.png'),
+} as const;
 
 const HEALTH_MAP: Record<HealthStatus, number> = {
   healthy: 100,
@@ -129,6 +153,8 @@ export default function ScanScreen() {
         human_toxicity_severity: number; pet_toxicity_severity: number;
         isHealthy: boolean; healthScore: number; healthIssues: string[];
         home_tips: string[]; pro_tips: string[];
+        max_height: string; flowering_season: string; fruiting_season: string;
+        growing_location: 'indoor' | 'outdoor' | 'both';
       };
 
       setResult({
@@ -153,6 +179,10 @@ export default function ScanScreen() {
         healthIssues: d.healthIssues ?? [],
         homeTips: d.home_tips ?? [],
         proTips: d.pro_tips ?? [],
+        maxHeight: d.max_height,
+        floweringSeason: d.flowering_season,
+        fruitingSeason: d.fruiting_season,
+        growingLocation: d.growing_location,
       });
       setPhase('result');
 
@@ -251,6 +281,10 @@ export default function ScanScreen() {
           human_toxicity_severity: result.humanToxicitySeverity,
           pet_toxicity_severity: result.petToxicitySeverity,
           toxicity_note: result.toxicityNote,
+          max_height: result.maxHeight,
+          flowering_season: result.floweringSeason,
+          fruiting_season: result.fruitingSeason,
+          growing_location: result.growingLocation,
         })
         .select('id')
         .single();
@@ -361,6 +395,10 @@ export default function ScanScreen() {
         human_toxicity_severity: result.humanToxicitySeverity,
         pet_toxicity_severity: result.petToxicitySeverity,
         toxicity_note: result.toxicityNote,
+        max_height: result.maxHeight,
+        flowering_season: result.floweringSeason,
+        fruiting_season: result.fruitingSeason,
+        growing_location: result.growingLocation,
       });
       if (favErr) throw new Error(favErr.message);
 
@@ -410,7 +448,7 @@ export default function ScanScreen() {
           <Ionicons name="camera-outline" size={64} color={Colors.primary} style={{ opacity: 0.8 }} />
           <Text style={styles.permissionTitle}>Camera access needed</Text>
           <Text style={styles.permissionBody}>
-            PlantPal needs camera access to scan and identify your plants.
+            Plant Park needs camera access to scan and identify your plants.
           </Text>
           <TouchableOpacity style={styles.primaryBtn} onPress={requestPermission} activeOpacity={0.85}>
             <Text style={styles.primaryBtnText}>Grant Access</Text>
@@ -497,12 +535,31 @@ export default function ScanScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Toxicity</Text>
             <View style={styles.toxicityRow}>
-              <ToxicitySeverityBar label="Humans" icon="body-outline" severity={result.humanToxicitySeverity} />
-              <ToxicitySeverityBar label="Pets" icon="paw" severity={result.petToxicitySeverity} />
+              <ToxicitySeverityBar label="Humans" icon={ICONS.warning} severity={result.humanToxicitySeverity} />
+              <ToxicitySeverityBar label="Pets" icon={ICONS.catFace} severity={result.petToxicitySeverity} />
             </View>
             {result.toxicityNote && (
               <Text style={styles.toxicityNote}>{result.toxicityNote}</Text>
             )}
+          </View>
+
+          {/* Plant details */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Plant Details</Text>
+            <View style={styles.infoGrid}>
+              {[
+                { icon: ICONS.ruler,         label: 'Max Height',       value: result.maxHeight,                                                       muted: false },
+                { icon: ICONS.cherryBlossom, label: 'Flowering Season', value: result.floweringSeason === 'N/A' ? 'Not applicable' : result.floweringSeason, muted: result.floweringSeason === 'N/A' },
+                { icon: ICONS.redApple,      label: 'Fruiting Season',  value: result.fruitingSeason === 'N/A' ? 'Not applicable' : result.fruitingSeason,   muted: result.fruitingSeason === 'N/A' },
+                { icon: ICONS.house,         label: 'Suitability',      value: GROWING_LOCATION_LABELS[result.growingLocation] ?? result.growingLocation,   muted: false },
+              ].map(({ icon, label, value, muted }) => (
+                <View key={label} style={styles.infoItem}>
+                  <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
+                  <Text style={styles.infoLabel}>{label}</Text>
+                  <Text style={[styles.infoValue, muted && styles.infoValueMuted]} numberOfLines={2}>{value}</Text>
+                </View>
+              ))}
+            </View>
           </View>
 
           {/* Issues / health */}
@@ -780,6 +837,26 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
 
   toxicityRow: { flexDirection: 'row', gap: Spacing.sm },
   toxicityNote: { fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 17, marginTop: Spacing.xs },
+
+  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  infoItem: {
+    width: '47%',
+    minHeight: 104,
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    gap: 4,
+  },
+  infoIcon: { width: 20, height: 20 },
+  infoLabel: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginTop: 4,
+  },
+  infoValue: { fontSize: FontSize.sm, color: Colors.textPrimary, fontWeight: '600' },
+  infoValueMuted: { color: Colors.textMuted },
 
   fixRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
   fixNum: {

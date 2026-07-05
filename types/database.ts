@@ -27,6 +27,11 @@ export type Database = {
           human_toxicity_severity: number | null;
           pet_toxicity_severity: number | null;
           toxicity_note: string | null;
+          calendar_event_id: string | null;
+          max_height: string | null;
+          flowering_season: string | null;
+          fruiting_season: string | null;
+          growing_location: 'indoor' | 'outdoor' | 'both' | null;
         };
         Insert: {
           id?: string;
@@ -53,6 +58,11 @@ export type Database = {
           human_toxicity_severity?: number | null;
           pet_toxicity_severity?: number | null;
           toxicity_note?: string | null;
+          calendar_event_id?: string | null;
+          max_height?: string | null;
+          flowering_season?: string | null;
+          fruiting_season?: string | null;
+          growing_location?: 'indoor' | 'outdoor' | 'both' | null;
         };
         Update: {
           id?: string;
@@ -79,6 +89,11 @@ export type Database = {
           human_toxicity_severity?: number | null;
           pet_toxicity_severity?: number | null;
           toxicity_note?: string | null;
+          calendar_event_id?: string | null;
+          max_height?: string | null;
+          flowering_season?: string | null;
+          fruiting_season?: string | null;
+          growing_location?: 'indoor' | 'outdoor' | 'both' | null;
         };
         Relationships: [];
       };
@@ -103,6 +118,10 @@ export type Database = {
           pet_toxicity_severity: number | null;
           toxicity_note: string | null;
           created_at: string;
+          max_height: string | null;
+          flowering_season: string | null;
+          fruiting_season: string | null;
+          growing_location: 'indoor' | 'outdoor' | 'both' | null;
         };
         Insert: {
           id?: string;
@@ -124,6 +143,10 @@ export type Database = {
           pet_toxicity_severity?: number | null;
           toxicity_note?: string | null;
           created_at?: string;
+          max_height?: string | null;
+          flowering_season?: string | null;
+          fruiting_season?: string | null;
+          growing_location?: 'indoor' | 'outdoor' | 'both' | null;
         };
         Update: {
           id?: string;
@@ -145,6 +168,10 @@ export type Database = {
           pet_toxicity_severity?: number | null;
           toxicity_note?: string | null;
           created_at?: string;
+          max_height?: string | null;
+          flowering_season?: string | null;
+          fruiting_season?: string | null;
+          growing_location?: 'indoor' | 'outdoor' | 'both' | null;
         };
         Relationships: [];
       };

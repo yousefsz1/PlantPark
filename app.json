@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "PlantPal",
-    "slug": "plantpal",
+    "name": "Plant Park",
+    "slug": "plant-park",
     "version": "1.0.0",
-    "scheme": "plantpal",
+    "scheme": "plantpark",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -14,14 +14,14 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.plantpal.app"
+      "bundleIdentifier": "com.plantpark.app"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0D2818"
       },
-      "package": "com.plantpal.app"
+      "package": "com.plantpark.app"
     },
     "web": {
       "bundler": "metro",
@@ -33,13 +33,13 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "PlantPal needs camera access to scan and identify your plants."
+          "cameraPermission": "Plant Park needs camera access to scan and identify your plants."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "PlantPal needs photo library access so you can pick a plant photo to scan."
+          "photosPermission": "Plant Park needs photo library access so you can pick a plant photo to scan."
         }
       ],
       [
@@ -48,6 +48,12 @@
           "icon": "./assets/icon.png",
           "color": "#2ECC71",
           "sounds": []
+        }
+      ],
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Plant Park uses calendar access to add optional watering reminders for your plants."
         }
       ]
     ],

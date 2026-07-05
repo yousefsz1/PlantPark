@@ -154,7 +154,7 @@ export default function AuthScreen() {
             <View style={styles.logoCircle}>
               <Ionicons name="leaf" size={44} color={Colors.primary} />
             </View>
-            <Text style={styles.appName}>PlantPal</Text>
+            <Text style={styles.appName}>Plant Park</Text>
             <Text style={styles.tagline}>Grow your green world</Text>
           </View>
 

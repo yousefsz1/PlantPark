@@ -9,12 +9,14 @@ import {
   Alert,
   Image,
   Dimensions,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
+import * as Calendar from 'expo-calendar';
 import { supabase } from '../../lib/supabase';
 import { scheduleTaskNotification, cancelPlantNotifications } from '../../lib/notifications';
 import { getLevel, xpToNextLevel } from '../../lib/levels';
@@ -83,6 +85,25 @@ const WATERING_LABELS: Record<string, string> = {
   monthly: 'Monthly',
 };
 
+const GROWING_LOCATION_LABELS: Record<string, string> = {
+  indoor: 'Indoor',
+  outdoor: 'Outdoor',
+  both: 'Both',
+};
+
+const ICONS = {
+  waterDrop:     require('../../assets/icons/water_drop.png'),
+  sun:           require('../../assets/icons/sun.png'),
+  seedling:      require('../../assets/icons/seedling.png'),
+  thermometer:   require('../../assets/icons/thermometer.png'),
+  ruler:         require('../../assets/icons/ruler.png'),
+  cherryBlossom: require('../../assets/icons/cherry_blossom.png'),
+  redApple:      require('../../assets/icons/red_apple.png'),
+  house:         require('../../assets/icons/house.png'),
+  warning:          require('../../assets/icons/warning.png'),
+  catFace:          require('../../assets/icons/cat_face.png'),
+} as const;
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function PlantDetailScreen() {
@@ -100,6 +121,7 @@ export default function PlantDetailScreen() {
   const [markingWatered, setMarkingWatered] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [deleting, setDeleting]             = useState(false);
+  const [addingToCalendar, setAddingToCalendar] = useState(false);
   const hasLoaded = useRef(false);
 
   const fetchData = useCallback(async () => {
@@ -274,6 +296,78 @@ export default function PlantDetailScreen() {
     }
   }, [plantId, fetchData]);
 
+  // ── Add to native calendar ───────────────────────────────────────────────────
+  const handleAddToCalendar = useCallback(async () => {
+    if (!plant || !wateringTask) return;
+    setAddingToCalendar(true);
+    try {
+      const permission = await Calendar.requestCalendarPermissions();
+      if (!permission.granted) {
+        Alert.alert(
+          'Calendar access needed',
+          'Enable calendar access for Plant Park in your device Settings to add watering reminders.',
+        );
+        return;
+      }
+
+      const calendars = await Calendar.getCalendars(Calendar.EntityTypes.EVENT);
+      let targetCalendar = calendars.find(c => c.allowsModifications);
+
+      if (!targetCalendar) {
+        if (Platform.OS === 'ios') {
+          const defaultCalendar = Calendar.getDefaultCalendarSync();
+          targetCalendar = await Calendar.createCalendar({
+            title: 'Plant Park',
+            color: '#2ECC71',
+            entityType: Calendar.EntityTypes.EVENT,
+            sourceId: defaultCalendar.sourceId,
+            name: 'Plant Park',
+            ownerAccount: 'Plant Park',
+            accessLevel: Calendar.CalendarAccessLevel.OWNER,
+          });
+        } else {
+          targetCalendar = await Calendar.createCalendar({
+            title: 'Plant Park',
+            color: '#2ECC71',
+            entityType: Calendar.EntityTypes.EVENT,
+            source: { isLocalAccount: true, name: 'Plant Park', type: Calendar.SourceType.LOCAL },
+            name: 'Plant Park',
+            ownerAccount: 'Plant Park',
+            accessLevel: Calendar.CalendarAccessLevel.OWNER,
+          });
+        }
+      }
+
+      const [year, month, day] = wateringTask.due_date.split('-').map(Number);
+      const startDate = new Date(year, month - 1, day, 9, 0, 0);
+      const endDate = new Date(year, month - 1, day, 9, 30, 0);
+
+      const event = await targetCalendar.createEvent({
+        title: `Water ${plant.name}`,
+        startDate,
+        endDate,
+        recurrenceRule: {
+          frequency: Calendar.Frequency.DAILY,
+          interval: wateringTask.interval_days,
+        },
+        alarms: [{ relativeOffset: 0 }],
+      });
+
+      const { error: updateErr } = await supabase
+        .from('plants')
+        .update({ calendar_event_id: event.id })
+        .eq('id', plantId);
+      if (updateErr) throw updateErr;
+
+      setPlant(prev => (prev ? { ...prev, calendar_event_id: event.id } : prev));
+      Alert.alert('Added to your calendar', `A recurring watering reminder for ${plant.name} has been added.`);
+    } catch (err) {
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to add calendar reminder.');
+    } finally {
+      setAddingToCalendar(false);
+    }
+  }, [plant, wateringTask, plantId]);
+
   // ── Loading / not found ──────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -304,10 +398,17 @@ export default function PlantDetailScreen() {
   const wateringProgress = getWateringProgress(wateringTask, Colors);
 
   const infoItems = [
-    { icon: 'water-outline',       label: 'Watering',     value: plant.watering_frequency ? WATERING_LABELS[plant.watering_frequency] : '—' },
-    { icon: 'sunny-outline',       label: 'Sunlight',     value: plant.sunlight ? SUNLIGHT_LABELS[plant.sunlight] : '—' },
-    { icon: 'earth-outline',       label: 'Soil',         value: plant.soil_type ?? '—' },
-    { icon: 'thermometer-outline', label: 'Temperature',  value: plant.temperature_range ?? '—' },
+    { icon: ICONS.waterDrop,   label: 'Watering',     value: plant.watering_frequency ? WATERING_LABELS[plant.watering_frequency] : '—' },
+    { icon: ICONS.sun,         label: 'Sunlight',     value: plant.sunlight ? SUNLIGHT_LABELS[plant.sunlight] : '—' },
+    { icon: ICONS.seedling,    label: 'Soil',         value: plant.soil_type ?? '—' },
+    { icon: ICONS.thermometer, label: 'Temperature',  value: plant.temperature_range ?? '—' },
+  ] as const;
+
+  const detailItems = [
+    { icon: ICONS.ruler,         label: 'Max Height',       value: plant.max_height ?? '—',                                              muted: false },
+    { icon: ICONS.cherryBlossom, label: 'Flowering Season', value: plant.flowering_season === 'N/A' ? 'Not applicable' : (plant.flowering_season ?? '—'), muted: plant.flowering_season === 'N/A' },
+    { icon: ICONS.redApple,      label: 'Fruiting Season', value: plant.fruiting_season === 'N/A' ? 'Not applicable' : (plant.fruiting_season ?? '—'),   muted: plant.fruiting_season === 'N/A' },
+    { icon: ICONS.house,         label: 'Suitability',      value: plant.growing_location ? (GROWING_LOCATION_LABELS[plant.growing_location] ?? plant.growing_location) : '—', muted: false },
   ] as const;
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -423,6 +524,30 @@ export default function PlantDetailScreen() {
                 Add this plant via the new flow to auto-create watering reminders.
               </Text>
             )}
+
+            {wateringTask ? (
+              plant.calendar_event_id ? (
+                <View style={styles.calendarAddedRow}>
+                  <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+                  <Text style={styles.calendarAddedText}>Reminder added ✓</Text>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.calendarBtn, addingToCalendar && styles.disabled]}
+                  onPress={handleAddToCalendar}
+                  disabled={addingToCalendar}
+                >
+                  {addingToCalendar ? (
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                  ) : (
+                    <>
+                      <Ionicons name="calendar-outline" size={18} color={Colors.primary} />
+                      <Text style={styles.calendarBtnText}>Add to Calendar</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )
+            ) : null}
           </View>
         </View>
 
@@ -431,8 +556,8 @@ export default function PlantDetailScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Toxicity</Text>
             <View style={styles.toxicityRow}>
-              <ToxicitySeverityBar label="Humans" icon="body-outline" severity={plant.human_toxicity_severity ?? 0} />
-              <ToxicitySeverityBar label="Pets" icon="paw" severity={plant.pet_toxicity_severity ?? 0} />
+              <ToxicitySeverityBar label="Humans" icon={ICONS.warning} severity={plant.human_toxicity_severity ?? 0} />
+              <ToxicitySeverityBar label="Pets" icon={ICONS.catFace} severity={plant.pet_toxicity_severity ?? 0} />
             </View>
             {plant.toxicity_note && (
               <Text style={styles.toxicityNote}>{plant.toxicity_note}</Text>
@@ -440,13 +565,27 @@ export default function PlantDetailScreen() {
           </View>
         )}
 
+        {/* ── Plant details ── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Plant Details</Text>
+          <View style={styles.infoGrid}>
+            {detailItems.map(({ icon, label, value, muted }) => (
+              <View key={label} style={styles.infoItem}>
+                <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
+                <Text style={styles.infoLabel}>{label}</Text>
+                <Text style={[styles.infoValue, muted && styles.infoValueMuted]} numberOfLines={2}>{value}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+
         {/* ── Care requirements ── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Care Requirements</Text>
           <View style={styles.infoGrid}>
             {infoItems.map(({ icon, label, value }) => (
               <View key={label} style={styles.infoItem}>
-                <Ionicons name={icon as any} size={20} color={Colors.primary} />
+                <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
                 <Text style={styles.infoLabel}>{label}</Text>
                 <Text style={styles.infoValue} numberOfLines={2}>{value}</Text>
               </View>
@@ -714,6 +853,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   infoItem: {
     width: '47%',
+    minHeight: 104,
     backgroundColor: Colors.surface,
     borderRadius: Radius.md,
     padding: Spacing.md,
@@ -721,6 +861,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     borderWidth: 1,
     borderColor: Colors.border,
   },
+  infoIcon: { width: 20, height: 20 },
   infoLabel: {
     fontSize: FontSize.xs,
     color: Colors.textMuted,
@@ -729,6 +870,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     marginTop: 4,
   },
   infoValue: { fontSize: FontSize.sm, color: Colors.textPrimary, fontWeight: '600' },
+  infoValueMuted: { color: Colors.textMuted },
 
   // Toxicity
   toxicityRow: { flexDirection: 'row', gap: Spacing.sm },
@@ -882,6 +1024,37 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     marginTop: Spacing.xs,
   },
   disabled: { opacity: 0.6 },
+
+  calendarBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    borderRadius: Radius.full,
+    paddingVertical: 12,
+    paddingHorizontal: Spacing.xl,
+    marginTop: Spacing.sm,
+    width: '100%',
+    backgroundColor: 'rgba(46,204,113,0.06)',
+  },
+  calendarBtnText: { fontSize: FontSize.sm, fontWeight: '700', color: Colors.primary },
+  calendarAddedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: Radius.full,
+    paddingVertical: 12,
+    paddingHorizontal: Spacing.xl,
+    marginTop: Spacing.sm,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  calendarAddedText: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.textMuted },
 
   // Progress photos
   photoGrid: {

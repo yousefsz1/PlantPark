@@ -1,5 +1,4 @@
-import { View, Text, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { View, Text, Image, StyleSheet, type ImageSourcePropType } from 'react-native';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../constants/theme';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -18,7 +17,7 @@ export default function ToxicitySeverityBar({
   severity,
 }: {
   label: string;
-  icon: string;
+  icon: ImageSourcePropType;
   severity: number;
 }) {
   const { Colors, FontSize } = useTheme();
@@ -31,14 +30,14 @@ export default function ToxicitySeverityBar({
   return (
     <View style={[styles.card, isToxic ? styles.cardToxic : styles.cardSafe]}>
       <View style={styles.labelRow}>
-        <Ionicons name={icon as any} size={14} color={Colors.textMuted} />
+        <Image source={icon} style={styles.icon} resizeMode="contain" />
         <Text style={styles.label}>{label}</Text>
       </View>
       <View style={styles.barsRow}>
         {[1, 2, 3, 4, 5].map((i) => (
           <View
             key={i}
-            style={[styles.bar, { backgroundColor: i <= clamped ? color : Colors.surfaceElevated }]}
+            style={[styles.bar, { backgroundColor: (clamped === 0 || i <= clamped) ? color : 'rgba(128,128,128,0.4)' }]}
           />
         ))}
       </View>
@@ -50,19 +49,20 @@ export default function ToxicitySeverityBar({
 function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   return StyleSheet.create({
     card: {
-      flex: 1,
+      width: '47%',
+      minHeight: 104,
       borderRadius: Radius.md,
       borderWidth: 1,
       padding: Spacing.md,
-      alignItems: 'center',
-      gap: 6,
+      gap: 4,
     },
     cardToxic: { backgroundColor: 'rgba(231,76,60,0.1)', borderColor: Colors.danger },
     cardSafe: { backgroundColor: 'rgba(46,204,113,0.1)', borderColor: Colors.primary },
-    labelRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
+    icon: { width: 24, height: 24 },
     label: { fontSize: FontSize.xs, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.6 },
-    barsRow: { flexDirection: 'row', gap: 3 },
-    bar: { width: 16, height: 6, borderRadius: 3 },
+    barsRow: { flexDirection: 'row', justifyContent: 'center', gap: 5 },
+    bar: { width: 18, height: 10, borderRadius: 5 },
     severityText: { fontSize: FontSize.xs, fontWeight: '700', textAlign: 'center' },
   });
 }

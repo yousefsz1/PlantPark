@@ -43,6 +43,10 @@ interface DetectedPlant {
   healthIssues: string[];
   home_tips: string[];
   pro_tips: string[];
+  max_height: string;
+  flowering_season: string;
+  fruiting_season: string;
+  growing_location: 'indoor' | 'outdoor' | 'both';
 }
 
 const SUNLIGHT_LABELS: Record<string, string> = {
@@ -50,6 +54,25 @@ const SUNLIGHT_LABELS: Record<string, string> = {
   medium: 'Indirect Light',
   bright: 'Bright Direct',
 };
+
+const GROWING_LOCATION_LABELS: Record<string, string> = {
+  indoor: 'Indoor',
+  outdoor: 'Outdoor',
+  both: 'Both',
+};
+
+const ICONS = {
+  waterDrop:     require('../assets/icons/water_drop.png'),
+  sun:           require('../assets/icons/sun.png'),
+  seedling:      require('../assets/icons/seedling.png'),
+  thermometer:   require('../assets/icons/thermometer.png'),
+  ruler:         require('../assets/icons/ruler.png'),
+  cherryBlossom: require('../assets/icons/cherry_blossom.png'),
+  redApple:      require('../assets/icons/red_apple.png'),
+  house:         require('../assets/icons/house.png'),
+  warning:          require('../assets/icons/warning.png'),
+  catFace:          require('../assets/icons/cat_face.png'),
+} as const;
 
 function addDaysToToday(n: number): string {
   const d = new Date();
@@ -178,6 +201,10 @@ export default function AddPlantScreen() {
           human_toxicity_severity: detected.human_toxicity_severity,
           pet_toxicity_severity: detected.pet_toxicity_severity,
           toxicity_note: detected.toxicityNote,
+          max_height: detected.max_height,
+          flowering_season: detected.flowering_season,
+          fruiting_season: detected.fruiting_season,
+          growing_location: detected.growing_location,
         })
         .select('id')
         .single();
@@ -284,6 +311,10 @@ export default function AddPlantScreen() {
         human_toxicity_severity: detected.human_toxicity_severity,
         pet_toxicity_severity: detected.pet_toxicity_severity,
         toxicity_note: detected.toxicityNote,
+        max_height: detected.max_height,
+        flowering_season: detected.flowering_season,
+        fruiting_season: detected.fruiting_season,
+        growing_location: detected.growing_location,
       });
       if (favErr) throw new Error(favErr.message);
 
@@ -326,10 +357,16 @@ export default function AddPlantScreen() {
   if (phase === 'review' && detected) {
     const wDays = Math.max(1, Math.round(detected.wateringDays || 7));
     const infoItems = [
-      { icon: 'water-outline',       label: 'Watering',    value: `Every ${wDays} day${wDays === 1 ? '' : 's'}` },
-      { icon: 'sunny-outline',       label: 'Sunlight',    value: SUNLIGHT_LABELS[detected.sunlight] ?? detected.sunlight },
-      { icon: 'earth-outline',       label: 'Soil',        value: detected.soilType },
-      { icon: 'thermometer-outline', label: 'Temperature', value: detected.temperature },
+      { icon: ICONS.waterDrop,   label: 'Watering',    value: `Every ${wDays} day${wDays === 1 ? '' : 's'}` },
+      { icon: ICONS.sun,         label: 'Sunlight',    value: SUNLIGHT_LABELS[detected.sunlight] ?? detected.sunlight },
+      { icon: ICONS.seedling,    label: 'Soil',        value: detected.soilType },
+      { icon: ICONS.thermometer, label: 'Temperature', value: detected.temperature },
+    ] as const;
+    const detailItems = [
+      { icon: ICONS.ruler,         label: 'Max Height',       value: detected.max_height,                                                       muted: false },
+      { icon: ICONS.cherryBlossom, label: 'Flowering Season', value: detected.flowering_season === 'N/A' ? 'Not applicable' : detected.flowering_season, muted: detected.flowering_season === 'N/A' },
+      { icon: ICONS.redApple,      label: 'Fruiting Season',  value: detected.fruiting_season === 'N/A' ? 'Not applicable' : detected.fruiting_season,   muted: detected.fruiting_season === 'N/A' },
+      { icon: ICONS.house,         label: 'Suitability',      value: GROWING_LOCATION_LABELS[detected.growing_location] ?? detected.growing_location,   muted: false },
     ] as const;
 
     return (
@@ -371,7 +408,7 @@ export default function AddPlantScreen() {
             <View style={styles.infoGrid}>
               {infoItems.map(({ icon, label, value }) => (
                 <View key={label} style={styles.infoItem}>
-                  <Ionicons name={icon as any} size={20} color={Colors.primary} />
+                  <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
                   <Text style={styles.infoLabel}>{label}</Text>
                   <Text style={styles.infoValue} numberOfLines={2}>{value}</Text>
                 </View>
@@ -379,12 +416,23 @@ export default function AddPlantScreen() {
             </View>
 
             <View style={styles.toxicityRow}>
-              <ToxicitySeverityBar label="Humans" icon="body-outline" severity={detected.human_toxicity_severity ?? 0} />
-              <ToxicitySeverityBar label="Pets" icon="paw" severity={detected.pet_toxicity_severity ?? 0} />
+              <ToxicitySeverityBar label="Humans" icon={ICONS.warning} severity={detected.human_toxicity_severity ?? 0} />
+              <ToxicitySeverityBar label="Pets" icon={ICONS.catFace} severity={detected.pet_toxicity_severity ?? 0} />
             </View>
             {detected.toxicityNote && (
               <Text style={styles.toxicityNote}>{detected.toxicityNote}</Text>
             )}
+
+            <Text style={styles.detailsSectionLabel}>Plant Details</Text>
+            <View style={styles.infoGrid}>
+              {detailItems.map(({ icon, label, value, muted }) => (
+                <View key={label} style={styles.infoItem}>
+                  <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
+                  <Text style={styles.infoLabel}>{label}</Text>
+                  <Text style={[styles.infoValue, muted && styles.infoValueMuted]} numberOfLines={2}>{value}</Text>
+                </View>
+              ))}
+            </View>
 
             <View style={styles.careTipBox}>
               <Text style={styles.careTipLabel}>Care Tip</Text>
@@ -581,11 +629,13 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   infoItem: {
     width: '47%',
+    minHeight: 104,
     backgroundColor: Colors.surfaceElevated,
     borderRadius: Radius.md,
     padding: Spacing.md,
     gap: 4,
   },
+  infoIcon: { width: 20, height: 20 },
   infoLabel: {
     fontSize: FontSize.xs,
     color: Colors.textMuted,
@@ -594,6 +644,14 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     marginTop: 4,
   },
   infoValue: { fontSize: FontSize.sm, color: Colors.textPrimary, fontWeight: '600' },
+  infoValueMuted: { color: Colors.textMuted },
+  detailsSectionLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
   toxicityRow: { flexDirection: 'row', gap: Spacing.sm },
   toxicityNote: { fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 17, marginTop: -Spacing.xs },
   careTipBox: {

@@ -348,3 +348,35 @@ CREATE POLICY "Users can insert own plant photos"
 
 CREATE POLICY "Users can delete own plant photos"
   ON public.plant_photos FOR DELETE USING (auth.uid() = user_id);
+
+-- ─── Plants table: native calendar sync ──────────────────────────────────────
+-- Stores the expo-calendar event ID for the plant's watering reminder, once
+-- the user opts in via "Add to Calendar" on the Plant Detail screen.
+-- Null means no calendar event has been created yet.
+
+ALTER TABLE public.plants
+  ADD COLUMN IF NOT EXISTS calendar_event_id TEXT;
+
+NOTIFY pgrst, 'reload schema';
+
+-- ─── Plants & Favourites: additional plant characteristics ──────────────────
+-- Populated by the detect-plant AI scan (max_height, flowering_season,
+-- fruiting_season, growing_location). Nullable — older rows predate this
+-- feature. flowering_season/fruiting_season may hold the literal string
+-- "N/A" when the trait doesn't apply to the plant.
+
+ALTER TABLE public.plants
+  ADD COLUMN IF NOT EXISTS max_height TEXT,
+  ADD COLUMN IF NOT EXISTS flowering_season TEXT,
+  ADD COLUMN IF NOT EXISTS fruiting_season TEXT,
+  ADD COLUMN IF NOT EXISTS growing_location TEXT
+    CHECK (growing_location IN ('indoor', 'outdoor', 'both'));
+
+ALTER TABLE public.favourites
+  ADD COLUMN IF NOT EXISTS max_height TEXT,
+  ADD COLUMN IF NOT EXISTS flowering_season TEXT,
+  ADD COLUMN IF NOT EXISTS fruiting_season TEXT,
+  ADD COLUMN IF NOT EXISTS growing_location TEXT
+    CHECK (growing_location IN ('indoor', 'outdoor', 'both'));
+
+NOTIFY pgrst, 'reload schema';
