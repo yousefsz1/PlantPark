@@ -17,6 +17,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { useRouter, useIsFocused } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { requestNotificationPermission, scheduleTaskNotification, cancelPlantNotifications } from '../../lib/notifications';
+import { getScanStatus, incrementScanCount } from '../../lib/scanLimits';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import ToxicitySeverityBar from '../../components/ToxicitySeverityBar';
@@ -118,6 +119,19 @@ export default function ScanScreen() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const runAnalysis = useCallback(async (uri: string) => {
+    const scanStatus = await getScanStatus();
+    if (scanStatus?.hasScansRemaining === false) {
+      Alert.alert(
+        'Scan limit reached',
+        `You've reached your ${scanStatus.tier} plan's limit of ${scanStatus.limit} scans this month.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'View Plans', onPress: () => router.push('/membership') },
+        ],
+      );
+      return;
+    }
+
     setPhotoUri(uri);
     setPhase('analyzing');
     setAnalyzeError(null);
@@ -186,6 +200,10 @@ export default function ScanScreen() {
       });
       setPhase('result');
 
+      // Meter the scan against the user's tier — fire and forget, not
+      // gated on the user later saving/favouriting the result.
+      incrementScanCount();
+
       // Award +30 XP — fire and forget
       supabase
         .rpc('increment_xp', { xp_amount: 30 })
@@ -196,7 +214,7 @@ export default function ScanScreen() {
       setAnalyzeError(msg);
       setPhase('camera');
     }
-  }, []);
+  }, [router]);
 
   const handleCapture = useCallback(async () => {
     if (!cameraRef.current) return;
@@ -835,10 +853,10 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   listIcon: { marginTop: 1 },
   listText: { flex: 1, fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 20 },
 
-  toxicityRow: { flexDirection: 'row', gap: Spacing.sm },
+  toxicityRow: { flexDirection: 'row', justifyContent: 'space-between', gap: Spacing.sm },
   toxicityNote: { fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 17, marginTop: Spacing.xs },
 
-  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: Spacing.sm },
   infoItem: {
     width: '47%',
     minHeight: 104,

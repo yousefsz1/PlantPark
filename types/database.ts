@@ -281,16 +281,25 @@ export type Database = {
           id: string;
           total_xp: number;
           created_at: string;
+          membership_tier: 'free' | 'basic' | 'pro';
+          scan_count_current_period: number;
+          scan_period_reset_at: string;
         };
         Insert: {
           id: string;
           total_xp?: number;
           created_at?: string;
+          membership_tier?: 'free' | 'basic' | 'pro';
+          scan_count_current_period?: number;
+          scan_period_reset_at?: string;
         };
         Update: {
           id?: string;
           total_xp?: number;
           created_at?: string;
+          membership_tier?: 'free' | 'basic' | 'pro';
+          scan_count_current_period?: number;
+          scan_period_reset_at?: string;
         };
         Relationships: [];
       };
@@ -304,6 +313,14 @@ export type Database = {
       complete_care_task: {
         Args: { task_id: string };
         Returns: unknown;
+      };
+      get_scan_status: {
+        Args: Record<string, never>;
+        Returns: unknown;
+      };
+      increment_scan_count: {
+        Args: Record<string, never>;
+        Returns: number;
       };
     };
     Enums: Record<string, never>;

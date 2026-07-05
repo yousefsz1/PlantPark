@@ -4,9 +4,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
+import { getScanStatus, type MembershipTier } from '../../lib/scanLimits';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import type { User } from '@supabase/supabase-js';
+
+function getTierBadgeConfig(Colors: ColorPalette): Record<MembershipTier, { label: string; icon: string; color: string; bg: string }> {
+  return {
+    free:  { label: 'Free Plan',  icon: 'leaf-outline', color: Colors.textSecondary, bg: Colors.surfaceElevated },
+    basic: { label: 'Basic Plan', icon: 'flash',        color: Colors.primary,       bg: 'rgba(46,204,113,0.12)' },
+    pro:   { label: 'Pro Plan',   icon: 'diamond',      color: Colors.rare,          bg: 'rgba(155,89,182,0.15)' },
+  };
+}
 
 const BADGES = [
   { id: '1', icon: 'leaf',    label: 'First Plant', unlocked: true },
@@ -18,10 +27,11 @@ const BADGES = [
 ] as const;
 
 const MENU_ITEMS = [
-  { icon: 'settings-outline',      label: 'Settings' },
-  { icon: 'notifications-outline', label: 'Reminders' },
-  { icon: 'share-social-outline',  label: 'Share Profile' },
-  { icon: 'help-circle-outline',   label: 'Help & FAQ' },
+  { icon: 'card-outline',          label: 'Membership',   route: '/membership' },
+  { icon: 'settings-outline',      label: 'Settings',      route: '/settings' },
+  { icon: 'notifications-outline', label: 'Reminders',     route: undefined },
+  { icon: 'share-social-outline',  label: 'Share Profile', route: undefined },
+  { icon: 'help-circle-outline',   label: 'Help & FAQ',    route: undefined },
 ] as const;
 
 export default function ProfileScreen() {
@@ -30,10 +40,12 @@ export default function ProfileScreen() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  const [tier, setTier] = useState<MembershipTier>('free');
 
   useFocusEffect(
     useCallback(() => {
       supabase.auth.getUser().then(({ data }) => setUser(data.user));
+      getScanStatus().then((status) => setTier(status?.tier ?? 'free'));
     }, []),
   );
 
@@ -54,6 +66,7 @@ export default function ProfileScreen() {
 
   const displayEmail = user?.email ?? '—';
   const displayName = user?.user_metadata?.display_name ?? displayEmail.split('@')[0];
+  const tierBadge = getTierBadgeConfig(Colors)[tier];
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -69,6 +82,14 @@ export default function ProfileScreen() {
             <Ionicons name="leaf" size={12} color={Colors.primary} />
             <Text style={styles.rankText}>Green Thumb • Rank 3</Text>
           </View>
+          <TouchableOpacity
+            style={[styles.tierBadge, { backgroundColor: tierBadge.bg }]}
+            onPress={() => router.push('/membership')}
+            activeOpacity={0.75}
+          >
+            <Ionicons name={tierBadge.icon as any} size={12} color={tierBadge.color} />
+            <Text style={[styles.tierBadgeText, { color: tierBadge.color }]}>{tierBadge.label}</Text>
+          </TouchableOpacity>
         </View>
 
         {/* XP progress */}
@@ -105,7 +126,7 @@ export default function ProfileScreen() {
           <TouchableOpacity
             key={item.label}
             style={styles.menuRow}
-            onPress={item.label === 'Settings' ? () => router.push('/settings') : undefined}
+            onPress={item.route ? () => router.push(item.route) : undefined}
           >
             <Ionicons name={item.icon as any} size={20} color={Colors.textSecondary} />
             <Text style={styles.menuLabel}>{item.label}</Text>
@@ -161,6 +182,16 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     borderRadius: Radius.full,
   },
   rankText: { fontSize: FontSize.sm, color: Colors.textSecondary },
+  tierBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: Radius.full,
+    marginTop: 6,
+  },
+  tierBadgeText: { fontSize: FontSize.sm, fontWeight: '700' },
 
   xpCard: {
     backgroundColor: Colors.surface,

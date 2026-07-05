@@ -14,9 +14,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import type { Favourite } from '../../types/database';
+import { getWateringLevel, getSunlightLevel, WATER_COLOR } from '../../lib/careLevels';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import ToxicitySeverityBar from '../../components/ToxicitySeverityBar';
+import LevelBar from '../../components/LevelBar';
 
 const SUNLIGHT_LABELS: Record<string, string> = {
   low: 'Low Light',
@@ -115,11 +117,13 @@ export default function FavouriteDetailScreen() {
   }
 
   const hasProTips = (favourite.health_tips_pro?.length ?? 0) > 0;
+  const wateringLevel = getWateringLevel(null, favourite.watering_frequency);
+  const sunlightLevel = getSunlightLevel(favourite.sunlight);
   const infoItems = [
-    { icon: ICONS.waterDrop,   label: 'Watering',    value: favourite.watering_frequency ? (WATERING_LABELS[favourite.watering_frequency] ?? favourite.watering_frequency) : '—' },
-    { icon: ICONS.sun,         label: 'Sunlight',    value: favourite.sunlight ? (SUNLIGHT_LABELS[favourite.sunlight] ?? favourite.sunlight) : '—' },
-    { icon: ICONS.seedling,    label: 'Soil',        value: favourite.soil_type ?? '—' },
-    { icon: ICONS.thermometer, label: 'Temperature', value: favourite.temperature ?? '—' },
+    { icon: ICONS.waterDrop,   label: 'Watering',    value: favourite.watering_frequency ? (WATERING_LABELS[favourite.watering_frequency] ?? favourite.watering_frequency) : '—', level: wateringLevel, barColor: WATER_COLOR },
+    { icon: ICONS.sun,         label: 'Sunlight',    value: favourite.sunlight ? (SUNLIGHT_LABELS[favourite.sunlight] ?? favourite.sunlight) : '—', level: sunlightLevel, barColor: Colors.xp },
+    { icon: ICONS.seedling,    label: 'Soil',        value: favourite.soil_type ?? '—', level: undefined as number | undefined, barColor: undefined as string | undefined },
+    { icon: ICONS.thermometer, label: 'Temperature', value: favourite.temperature ?? '—', level: undefined as number | undefined, barColor: undefined as string | undefined },
   ] as const;
 
   const detailItems = [
@@ -195,11 +199,14 @@ export default function FavouriteDetailScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Care Requirements</Text>
           <View style={styles.infoGrid}>
-            {infoItems.map(({ icon, label, value }) => (
+            {infoItems.map(({ icon, label, value, level, barColor }) => (
               <View key={label} style={styles.infoItem}>
                 <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
                 <Text style={styles.infoLabel}>{label}</Text>
                 <Text style={styles.infoValue} numberOfLines={2}>{value}</Text>
+                {level !== undefined && barColor !== undefined && (
+                  <LevelBar level={level} color={barColor} />
+                )}
               </View>
             ))}
           </View>
@@ -341,11 +348,11 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   },
 
   // Toxicity
-  toxicityRow: { flexDirection: 'row', gap: Spacing.sm },
+  toxicityRow: { flexDirection: 'row', justifyContent: 'space-between', gap: Spacing.sm },
   toxicityNote: { fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 17, marginTop: Spacing.sm },
 
   // Info grid
-  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: Spacing.sm },
   infoItem: {
     width: '47%',
     minHeight: 104,

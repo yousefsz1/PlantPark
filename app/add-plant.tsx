@@ -16,9 +16,12 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../lib/supabase';
 import { requestNotificationPermission, scheduleTaskNotification, cancelPlantNotifications } from '../lib/notifications';
+import { getScanStatus, incrementScanCount } from '../lib/scanLimits';
+import { getWateringLevel, getSunlightLevel, WATER_COLOR } from '../lib/careLevels';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../constants/theme';
 import { useTheme } from '../contexts/ThemeContext';
 import ToxicitySeverityBar from '../components/ToxicitySeverityBar';
+import LevelBar from '../components/LevelBar';
 
 type Phase = 'capture' | 'analyzing' | 'review';
 
@@ -96,6 +99,19 @@ export default function AddPlantScreen() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const runAnalysis = useCallback(async (uri: string) => {
+    const scanStatus = await getScanStatus();
+    if (scanStatus?.hasScansRemaining === false) {
+      Alert.alert(
+        'Scan limit reached',
+        `You've reached your ${scanStatus.tier} plan's limit of ${scanStatus.limit} scans this month.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'View Plans', onPress: () => router.push('/membership') },
+        ],
+      );
+      return;
+    }
+
     setPhotoUri(uri);
     setPhase('analyzing');
     setAnalyzeError(null);
@@ -119,11 +135,15 @@ export default function AddPlantScreen() {
       if (data?.error) throw new Error(data.error);
       setDetected(data as DetectedPlant);
       setPhase('review');
+
+      // Meter the scan against the user's tier — fire and forget, not
+      // gated on the user later saving/favouriting the result.
+      incrementScanCount();
     } catch (err) {
       setAnalyzeError(err instanceof Error ? err.message : 'Detection failed. Please try again.');
       setPhase('capture');
     }
-  }, []);
+  }, [router]);
 
   const handleTakePhoto = useCallback(async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -356,11 +376,13 @@ export default function AddPlantScreen() {
   // ── Review ───────────────────────────────────────────────────────────────────
   if (phase === 'review' && detected) {
     const wDays = Math.max(1, Math.round(detected.wateringDays || 7));
+    const wateringLevel = getWateringLevel(wDays, detected.wateringFrequency);
+    const sunlightLevel = getSunlightLevel(detected.sunlight);
     const infoItems = [
-      { icon: ICONS.waterDrop,   label: 'Watering',    value: `Every ${wDays} day${wDays === 1 ? '' : 's'}` },
-      { icon: ICONS.sun,         label: 'Sunlight',    value: SUNLIGHT_LABELS[detected.sunlight] ?? detected.sunlight },
-      { icon: ICONS.seedling,    label: 'Soil',        value: detected.soilType },
-      { icon: ICONS.thermometer, label: 'Temperature', value: detected.temperature },
+      { icon: ICONS.waterDrop,   label: 'Watering',    value: `Every ${wDays} day${wDays === 1 ? '' : 's'}`, level: wateringLevel, barColor: WATER_COLOR },
+      { icon: ICONS.sun,         label: 'Sunlight',    value: SUNLIGHT_LABELS[detected.sunlight] ?? detected.sunlight, level: sunlightLevel, barColor: Colors.xp },
+      { icon: ICONS.seedling,    label: 'Soil',        value: detected.soilType, level: undefined as number | undefined, barColor: undefined as string | undefined },
+      { icon: ICONS.thermometer, label: 'Temperature', value: detected.temperature, level: undefined as number | undefined, barColor: undefined as string | undefined },
     ] as const;
     const detailItems = [
       { icon: ICONS.ruler,         label: 'Max Height',       value: detected.max_height,                                                       muted: false },
@@ -406,11 +428,14 @@ export default function AddPlantScreen() {
             <Text style={styles.reviewSpecies}>{detected.species}</Text>
 
             <View style={styles.infoGrid}>
-              {infoItems.map(({ icon, label, value }) => (
+              {infoItems.map(({ icon, label, value, level, barColor }) => (
                 <View key={label} style={styles.infoItem}>
                   <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
                   <Text style={styles.infoLabel}>{label}</Text>
                   <Text style={styles.infoValue} numberOfLines={2}>{value}</Text>
+                  {level !== undefined && barColor !== undefined && (
+                    <LevelBar level={level} color={barColor} />
+                  )}
                 </View>
               ))}
             </View>
@@ -626,7 +651,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     color: Colors.textSecondary,
     marginTop: -Spacing.sm,
   },
-  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: Spacing.sm },
   infoItem: {
     width: '47%',
     minHeight: 104,
@@ -652,7 +677,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
-  toxicityRow: { flexDirection: 'row', gap: Spacing.sm },
+  toxicityRow: { flexDirection: 'row', justifyContent: 'space-between', gap: Spacing.sm },
   toxicityNote: { fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 17, marginTop: -Spacing.xs },
   careTipBox: {
     backgroundColor: 'rgba(46,204,113,0.1)',

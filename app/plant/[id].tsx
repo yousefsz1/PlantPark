@@ -20,10 +20,12 @@ import * as Calendar from 'expo-calendar';
 import { supabase } from '../../lib/supabase';
 import { scheduleTaskNotification, cancelPlantNotifications } from '../../lib/notifications';
 import { getLevel, xpToNextLevel } from '../../lib/levels';
+import { getWateringLevel, getSunlightLevel, WATER_COLOR } from '../../lib/careLevels';
 import type { Plant, CareTask, PlantPhoto } from '../../types/database';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import ToxicitySeverityBar from '../../components/ToxicitySeverityBar';
+import LevelBar from '../../components/LevelBar';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PHOTO_COL_SIZE = (SCREEN_WIDTH - Spacing.md * 2 - Spacing.sm * 2) / 3;
@@ -397,11 +399,14 @@ export default function PlantDetailScreen() {
   const watering         = getWateringStatus(wateringTask, Colors);
   const wateringProgress = getWateringProgress(wateringTask, Colors);
 
+  const wateringLevel = getWateringLevel(wateringTask?.interval_days, plant.watering_frequency);
+  const sunlightLevel = getSunlightLevel(plant.sunlight);
+
   const infoItems = [
-    { icon: ICONS.waterDrop,   label: 'Watering',     value: plant.watering_frequency ? WATERING_LABELS[plant.watering_frequency] : '—' },
-    { icon: ICONS.sun,         label: 'Sunlight',     value: plant.sunlight ? SUNLIGHT_LABELS[plant.sunlight] : '—' },
-    { icon: ICONS.seedling,    label: 'Soil',         value: plant.soil_type ?? '—' },
-    { icon: ICONS.thermometer, label: 'Temperature',  value: plant.temperature_range ?? '—' },
+    { icon: ICONS.waterDrop,   label: 'Watering',     value: plant.watering_frequency ? WATERING_LABELS[plant.watering_frequency] : '—', level: wateringLevel, barColor: WATER_COLOR },
+    { icon: ICONS.sun,         label: 'Sunlight',     value: plant.sunlight ? SUNLIGHT_LABELS[plant.sunlight] : '—', level: sunlightLevel, barColor: Colors.xp },
+    { icon: ICONS.seedling,    label: 'Soil',         value: plant.soil_type ?? '—', level: undefined as number | undefined, barColor: undefined as string | undefined },
+    { icon: ICONS.thermometer, label: 'Temperature',  value: plant.temperature_range ?? '—', level: undefined as number | undefined, barColor: undefined as string | undefined },
   ] as const;
 
   const detailItems = [
@@ -583,11 +588,14 @@ export default function PlantDetailScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Care Requirements</Text>
           <View style={styles.infoGrid}>
-            {infoItems.map(({ icon, label, value }) => (
+            {infoItems.map(({ icon, label, value, level, barColor }) => (
               <View key={label} style={styles.infoItem}>
                 <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
                 <Text style={styles.infoLabel}>{label}</Text>
                 <Text style={styles.infoValue} numberOfLines={2}>{value}</Text>
+                {level !== undefined && barColor !== undefined && (
+                  <LevelBar level={level} color={barColor} />
+                )}
               </View>
             ))}
           </View>
@@ -850,7 +858,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   },
 
   // Info grid
-  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: Spacing.sm },
   infoItem: {
     width: '47%',
     minHeight: 104,
@@ -873,7 +881,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   infoValueMuted: { color: Colors.textMuted },
 
   // Toxicity
-  toxicityRow: { flexDirection: 'row', gap: Spacing.sm },
+  toxicityRow: { flexDirection: 'row', justifyContent: 'space-between', gap: Spacing.sm },
   toxicityNote: { fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 17, marginTop: Spacing.sm },
 
   // Care tip
