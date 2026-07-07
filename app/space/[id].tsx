@@ -346,7 +346,7 @@ export default function SpaceDetailScreen() {
               plant={p}
               spaceName={space.name}
               removing={removingId === p.id}
-              onPress={() => router.push(`/plant/${p.id}`)}
+              onPress={() => router.push(p.is_grass ? `/grass/${p.id}` : `/plant/${p.id}`)}
               onRemove={() => handleRemoveFromSpace(p)}
             />
           ))

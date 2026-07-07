@@ -97,6 +97,7 @@ export default function AddPlantScreen() {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [compressed, setCompressed] = useState<{ uri: string; base64: string } | null>(null);
   const [detected, setDetected] = useState<DetectedPlant | null>(null);
+  const [grassName, setGrassName] = useState<string | null>(null);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -150,6 +151,7 @@ export default function AddPlantScreen() {
       if (data?.error) throw new Error(data.error);
       const d = data as DetectedPlant;
       if (d.is_grass) {
+        setGrassName(d.name ?? null);
         setPhase('grass');
       } else {
         setDetected(d);
@@ -170,6 +172,7 @@ export default function AddPlantScreen() {
     setPhotoUri(null);
     setCompressed(null);
     setDetected(null);
+    setGrassName(null);
     setAnalyzeError(null);
     setSaveError(null);
     setFavourited(false);
@@ -421,7 +424,10 @@ export default function AddPlantScreen() {
           </Text>
           <TouchableOpacity
             style={[styles.saveBtn, { width: '100%' }]}
-            onPress={() => Alert.alert('Coming soon', 'Lawn care planning is coming soon!')}
+            onPress={() => router.push({
+              pathname: '/grass-planner',
+              params: { photoUri: photoUri ?? '', name: grassName ?? '' },
+            })}
           >
             <Text style={styles.saveBtnText}>Set up lawn care plan</Text>
           </TouchableOpacity>

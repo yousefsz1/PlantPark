@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, Ac
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import Constants from 'expo-constants';
 import { supabase } from '../lib/supabase';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../constants/theme';
 import { useTheme } from '../contexts/ThemeContext';
@@ -51,6 +52,9 @@ export default function SettingsScreen() {
   const router = useRouter();
   const [wateringReminders, setWateringReminders] = useState(true);
   const [deletingAccount, setDeletingAccount] = useState(false);
+
+  const appVersion = Constants.expoConfig?.version;
+  const buildNumber = Constants.expoConfig?.android?.versionCode;
 
   function handleDeleteAccount() {
     Alert.alert(
@@ -117,11 +121,6 @@ export default function SettingsScreen() {
         <Text style={styles.sectionTitle}>App</Text>
         <SettingsRow icon="color-palette-outline" label="Display" onPress={() => router.push('/display')} />
         <SettingsRow icon="log-out-outline" label="Sign Out" onPress={() => comingSoon('Sign Out')} />
-        <SettingsRow
-          icon="information-circle-outline"
-          label="App Version"
-          right={<Text style={styles.rowValue}>1.0.0</Text>}
-        />
 
         <Text style={styles.sectionTitle}>Legal</Text>
         <SettingsRow icon="document-text-outline" label="Privacy Policy" onPress={() => comingSoon('Privacy Policy')} />
@@ -136,6 +135,12 @@ export default function SettingsScreen() {
           onPress={handleDeleteAccount}
           right={deletingAccount ? <ActivityIndicator size="small" color={Colors.danger} /> : undefined}
         />
+
+        {appVersion ? (
+          <Text style={styles.versionText}>
+            Plant Park v{appVersion}{buildNumber ? ` (Build ${buildNumber})` : ''}
+          </Text>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -192,5 +197,12 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   rowLabel: { flex: 1, fontSize: FontSize.md, color: Colors.textPrimary },
   rowLabelDestructive: { color: Colors.danger },
   rowValue: { fontSize: FontSize.sm, color: Colors.textMuted },
+
+  versionText: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    marginTop: Spacing.lg,
+  },
   });
 }

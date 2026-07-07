@@ -124,6 +124,7 @@ export default function ScanScreen() {
   const [photoUri, setPhotoUri]         = useState<string | null>(null);
   const [photoBase64, setPhotoBase64]   = useState<string | null>(null);
   const [result, setResult]             = useState<ScanResult | null>(null);
+  const [grassName, setGrassName]       = useState<string | null>(null);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [xpTotal, setXpTotal]           = useState<number | null>(null);
   const [saved, setSaved]               = useState(false);
@@ -198,6 +199,7 @@ export default function ScanScreen() {
       };
 
       if (d.is_grass) {
+        setGrassName(d.name ?? null);
         setPhase('grass');
       } else {
         setResult({
@@ -480,6 +482,7 @@ export default function ScanScreen() {
     setPhotoUri(null);
     setPhotoBase64(null);
     setResult(null);
+    setGrassName(null);
     setAnalyzeError(null);
     setXpTotal(null);
     setSaved(false);
@@ -544,7 +547,10 @@ export default function ScanScreen() {
           </Text>
           <TouchableOpacity
             style={styles.primaryBtn}
-            onPress={() => Alert.alert('Coming soon', 'Lawn care planning is coming soon!')}
+            onPress={() => router.push({
+              pathname: '/grass-planner',
+              params: { photoUri: photoUri ?? '', name: grassName ?? '' },
+            })}
             activeOpacity={0.85}
           >
             <Text style={styles.primaryBtnText}>Set up lawn care plan</Text>

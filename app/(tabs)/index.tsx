@@ -571,7 +571,7 @@ export default function GardenScreen() {
                 plant={p}
                 pendingTasks={pendingTasks}
                 deleting={deletingPlant === p.id}
-                onPress={() => router.push(`/plant/${p.id}`)}
+                onPress={() => router.push(p.is_grass ? `/grass/${p.id}` : `/plant/${p.id}`)}
                 onDelete={() => handleDeletePlant(p)}
               />
             ))}

@@ -37,6 +37,17 @@ export type Database = {
           health_diagnosis_issues: string | null;
           health_recommendation: string | null;
           health_checked_at: string | null;
+          is_grass: boolean | null;
+          lawn_length_m: number | null;
+          lawn_width_m: number | null;
+          lawn_area_m2: number | null;
+          sun_exposure: 'full_sun' | 'partial_shade' | 'full_shade' | null;
+          lawn_condition: 'healthy' | 'patchy' | 'yellowing' | 'unsure' | null;
+          fertilizing_frequency_days: number | null;
+          last_fertilized_at: string | null;
+          mowing_frequency_days: number | null;
+          last_mowed_at: string | null;
+          grass_health_issues: string[] | null;
         };
         Insert: {
           id?: string;
@@ -73,6 +84,17 @@ export type Database = {
           health_diagnosis_issues?: string | null;
           health_recommendation?: string | null;
           health_checked_at?: string | null;
+          is_grass?: boolean | null;
+          lawn_length_m?: number | null;
+          lawn_width_m?: number | null;
+          lawn_area_m2?: number | null;
+          sun_exposure?: 'full_sun' | 'partial_shade' | 'full_shade' | null;
+          lawn_condition?: 'healthy' | 'patchy' | 'yellowing' | 'unsure' | null;
+          fertilizing_frequency_days?: number | null;
+          last_fertilized_at?: string | null;
+          mowing_frequency_days?: number | null;
+          last_mowed_at?: string | null;
+          grass_health_issues?: string[] | null;
         };
         Update: {
           id?: string;
@@ -109,6 +131,17 @@ export type Database = {
           health_diagnosis_issues?: string | null;
           health_recommendation?: string | null;
           health_checked_at?: string | null;
+          is_grass?: boolean | null;
+          lawn_length_m?: number | null;
+          lawn_width_m?: number | null;
+          lawn_area_m2?: number | null;
+          sun_exposure?: 'full_sun' | 'partial_shade' | 'full_shade' | null;
+          lawn_condition?: 'healthy' | 'patchy' | 'yellowing' | 'unsure' | null;
+          fertilizing_frequency_days?: number | null;
+          last_fertilized_at?: string | null;
+          mowing_frequency_days?: number | null;
+          last_mowed_at?: string | null;
+          grass_health_issues?: string[] | null;
         };
         Relationships: [
           {

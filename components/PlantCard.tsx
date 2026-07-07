@@ -35,16 +35,24 @@ export default function PlantCard({ plant, displayHealth }: { plant: Plant; disp
             <Text style={styles.plantName}>{plant.name}</Text>
             {plant.species ? <Text style={styles.plantSpecies}>{plant.species}</Text> : null}
           </View>
-          <View style={styles.levelBadge}>
-            <Text style={styles.levelBadgeText}>Lv {plant.level}</Text>
-          </View>
+          {plant.is_grass ? (
+            <View style={styles.lawnBadge}>
+              <Text style={styles.lawnBadgeText}>🌱 Lawn</Text>
+            </View>
+          ) : (
+            <View style={styles.levelBadge}>
+              <Text style={styles.levelBadgeText}>Lv {plant.level}</Text>
+            </View>
+          )}
         </View>
-        <View style={styles.healthRow}>
-          <View style={styles.healthBarBg}>
-            <View style={[styles.healthBarFill, { width: `${health}%`, backgroundColor: color }]} />
+        {!plant.is_grass && (
+          <View style={styles.healthRow}>
+            <View style={styles.healthBarBg}>
+              <View style={[styles.healthBarFill, { width: `${health}%`, backgroundColor: color }]} />
+            </View>
+            <Text style={[styles.healthPct, { color }]}>{health}%</Text>
           </View>
-          <Text style={[styles.healthPct, { color }]}>{health}%</Text>
-        </View>
+        )}
       </View>
     </View>
   );
@@ -86,6 +94,15 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
       paddingVertical: 2,
     },
     levelBadgeText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.textPrimary },
+    lawnBadge: {
+      backgroundColor: 'rgba(46,204,113,0.12)',
+      borderRadius: Radius.full,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderWidth: 1,
+      borderColor: 'rgba(46,204,113,0.3)',
+    },
+    lawnBadgeText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.primary },
     healthRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
     healthBarBg: {
       flex: 1,
