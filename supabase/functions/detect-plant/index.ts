@@ -13,6 +13,7 @@ const SYSTEM_PROMPT = `You are an expert botanist and plant care specialist. Ide
 {
   "name": "Common name of the plant",
   "species": "Genus species (botanical name)",
+  "isGrass": <boolean — true ONLY if this is turf/lawn grass (grown as a mowed ground-cover lawn, e.g. Bermuda, Kentucky bluegrass, fescue, ryegrass, zoysia), false for everything else including ornamental/architectural grasses (pampas grass, fountain grass, liriope, mondo grass, zebra grass) and any potted/individual specimen>,
   "wateringFrequency": "daily" | "weekly" | "monthly",
   "wateringDays": <number — watering interval in days>,
   "sunlight": "low" | "medium" | "bright",
@@ -47,6 +48,7 @@ const SYSTEM_PROMPT = `You are an expert botanist and plant care specialist. Ide
 }
 
 Rules:
+- isGrass must be true ONLY for turf/lawn grass — a dense, uniform, mowed ground-cover lawn covering the ground, not an individual potted or clumping specimen. Return false for ornamental/architectural grasses grown as accent plants (pampas grass, fountain grass, liriope, mondo grass, zebra grass), for anything in a pot/container, and for all non-grass plants. When genuinely uncertain whether a grass-like photo shows lawn turf vs. an ornamental specimen, default to false.
 - wateringFrequency: "daily" = every 1-3 days, "weekly" = every 4-14 days, "monthly" = 15+ days
 - wateringDays must match wateringFrequency (e.g. "weekly" with 7 days is valid)
 - sunlight: "low" = shade-tolerant, "medium" = indirect light, "bright" = direct/strong indirect
@@ -384,6 +386,11 @@ serve(async (req: Request) => {
     // Strip any accidental markdown fences
     const jsonStr = raw.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim();
     const parsed = JSON.parse(jsonStr);
+
+    // Expose the grass/lawn detection field under the snake_case name the
+    // client expects, matching the convention below.
+    parsed.is_grass = parsed.isGrass;
+    delete parsed.isGrass;
 
     // Independent toxicity double-check via Claude Haiku — never fails the scan.
     const claudeToxicity = await fetchClaudeToxicityCheck(parsed.name, parsed.species);

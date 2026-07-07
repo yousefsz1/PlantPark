@@ -18,10 +18,12 @@ import { useRouter, useIsFocused } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { requestNotificationPermission, scheduleTaskNotification, cancelPlantNotifications } from '../../lib/notifications';
 import { getScanStatus, incrementScanCount } from '../../lib/scanLimits';
+import { getWateringLevel, getSunlightLevel, WATER_COLOR } from '../../lib/careLevels';
 import type { Space } from '../../types/database';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import ToxicitySeverityBar from '../../components/ToxicitySeverityBar';
+import LevelBar from '../../components/LevelBar';
 import CreateSpaceModal from '../../components/CreateSpaceModal';
 
 type HealthStatus = 'healthy' | 'mild' | 'serious' | 'critical';
@@ -61,7 +63,7 @@ interface ScanResult {
   healthRecommendation: string | null;
 }
 
-type Phase = 'camera' | 'analyzing' | 'result';
+type Phase = 'camera' | 'analyzing' | 'result' | 'grass';
 
 function getStatusConfig(Colors: ColorPalette): Record<HealthStatus, { label: string; color: string; bg: string }> {
   return {
@@ -71,6 +73,12 @@ function getStatusConfig(Colors: ColorPalette): Record<HealthStatus, { label: st
     critical: { label: 'Critical', color: Colors.danger,  bg: '#2E0808' },
   };
 }
+
+const SUNLIGHT_LABELS: Record<string, string> = {
+  low: 'Low Light',
+  medium: 'Indirect Light',
+  bright: 'Bright Direct',
+};
 
 const GROWING_LOCATION_LABELS: Record<string, string> = {
   indoor: 'Indoor',
@@ -173,7 +181,7 @@ export default function ScanScreen() {
       if ('error' in data) throw new Error((data as { error: string }).error);
 
       const d = data as {
-        name: string; species: string;
+        name: string; species: string; is_grass: boolean;
         wateringFrequency: 'daily' | 'weekly' | 'monthly'; wateringDays: number;
         sunlight: 'low' | 'medium' | 'bright'; soilType: string;
         temperature: string; careTip: string;
@@ -189,37 +197,41 @@ export default function ScanScreen() {
         health_recommendation: string | null;
       };
 
-      setResult({
-        name: d.name,
-        species: d.species,
-        status: d.healthScore >= 80 ? 'healthy' : d.healthScore >= 55 ? 'mild' : d.healthScore >= 30 ? 'serious' : 'critical',
-        wateringFrequency: d.wateringFrequency,
-        wateringDays: d.wateringDays,
-        sunlight: d.sunlight,
-        soilType: d.soilType,
-        temperature: d.temperature,
-        careTip: d.careTip,
-        fertilizingDays: d.fertilizingDays,
-        mistingDays: d.mistingDays,
-        toxicToHumans: d.toxicToHumans,
-        toxicToPets: d.toxicToPets,
-        humanToxicitySeverity: d.human_toxicity_severity,
-        petToxicitySeverity: d.pet_toxicity_severity,
-        toxicityNote: d.toxicityNote ?? null,
-        isHealthy: d.isHealthy,
-        healthScore: d.healthScore ?? (d.isHealthy ? 100 : 65),
-        healthIssues: d.healthIssues ?? [],
-        homeTips: d.home_tips ?? [],
-        proTips: d.pro_tips ?? [],
-        maxHeight: d.max_height,
-        floweringSeason: d.flowering_season,
-        fruitingSeason: d.fruiting_season,
-        growingLocation: d.growing_location,
-        healthDiagnosisStatus: d.health_status,
-        healthDiagnosisIssues: d.health_diagnosis_issues ?? null,
-        healthRecommendation: d.health_recommendation ?? null,
-      });
-      setPhase('result');
+      if (d.is_grass) {
+        setPhase('grass');
+      } else {
+        setResult({
+          name: d.name,
+          species: d.species,
+          status: d.healthScore >= 80 ? 'healthy' : d.healthScore >= 55 ? 'mild' : d.healthScore >= 30 ? 'serious' : 'critical',
+          wateringFrequency: d.wateringFrequency,
+          wateringDays: d.wateringDays,
+          sunlight: d.sunlight,
+          soilType: d.soilType,
+          temperature: d.temperature,
+          careTip: d.careTip,
+          fertilizingDays: d.fertilizingDays,
+          mistingDays: d.mistingDays,
+          toxicToHumans: d.toxicToHumans,
+          toxicToPets: d.toxicToPets,
+          humanToxicitySeverity: d.human_toxicity_severity,
+          petToxicitySeverity: d.pet_toxicity_severity,
+          toxicityNote: d.toxicityNote ?? null,
+          isHealthy: d.isHealthy,
+          healthScore: d.healthScore ?? (d.isHealthy ? 100 : 65),
+          healthIssues: d.healthIssues ?? [],
+          homeTips: d.home_tips ?? [],
+          proTips: d.pro_tips ?? [],
+          maxHeight: d.max_height,
+          floweringSeason: d.flowering_season,
+          fruitingSeason: d.fruiting_season,
+          growingLocation: d.growing_location,
+          healthDiagnosisStatus: d.health_status,
+          healthDiagnosisIssues: d.health_diagnosis_issues ?? null,
+          healthRecommendation: d.health_recommendation ?? null,
+        });
+        setPhase('result');
+      }
 
       // Meter the scan against the user's tier — fire and forget, not
       // gated on the user later saving/favouriting the result.
@@ -520,9 +532,37 @@ export default function ScanScreen() {
     );
   }
 
+  // ─── Grass detected ────────────────────────────────────────────────────────
+  if (phase === 'grass') {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.permissionWrap}>
+          <Ionicons name="leaf" size={64} color={Colors.primary} style={{ opacity: 0.8 }} />
+          <Text style={styles.permissionTitle}>Grass detected!</Text>
+          <Text style={styles.permissionBody}>
+            Lawns get a different care plan than potted plants — mowing and fertilizing on their own schedule instead of watering and sunlight.
+          </Text>
+          <TouchableOpacity
+            style={styles.primaryBtn}
+            onPress={() => Alert.alert('Coming soon', 'Lawn care planning is coming soon!')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.primaryBtnText}>Set up lawn care plan</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={resetScan} activeOpacity={0.7}>
+            <Text style={styles.secondaryBtnText}>This isn't grass, rescan</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   // ─── Result ────────────────────────────────────────────────────────────────
   if (phase === 'result' && result) {
     const cfg = getStatusConfig(Colors)[result.status];
+    const wDays = Math.max(1, Math.round(result.wateringDays || 7));
+    const wateringLevel = getWateringLevel(wDays, result.wateringFrequency);
+    const sunlightLevel = getSunlightLevel(result.sunlight);
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScrollView
@@ -572,6 +612,28 @@ export default function ScanScreen() {
             <View style={[styles.statusBadge, { backgroundColor: cfg.bg, borderColor: cfg.color }]}>
               <View style={[styles.statusDot, { backgroundColor: cfg.color }]} />
               <Text style={[styles.statusText, { color: cfg.color }]}>{cfg.label}</Text>
+            </View>
+          </View>
+
+          {/* Care Requirements */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Care Requirements</Text>
+            <View style={styles.infoGrid}>
+              {[
+                { icon: ICONS.waterDrop,   label: 'Watering',    value: `Every ${wDays} day${wDays === 1 ? '' : 's'}`, level: wateringLevel, barColor: WATER_COLOR },
+                { icon: ICONS.sun,         label: 'Sunlight',    value: SUNLIGHT_LABELS[result.sunlight] ?? result.sunlight, level: sunlightLevel, barColor: Colors.xp },
+                { icon: ICONS.seedling,    label: 'Soil',        value: result.soilType, level: undefined as number | undefined, barColor: undefined as string | undefined },
+                { icon: ICONS.thermometer, label: 'Temperature', value: result.temperature, level: undefined as number | undefined, barColor: undefined as string | undefined },
+              ].map(({ icon, label, value, level, barColor }) => (
+                <View key={label} style={styles.infoItem}>
+                  <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
+                  <Text style={styles.infoLabel}>{label}</Text>
+                  <Text style={styles.infoValue} numberOfLines={2}>{value}</Text>
+                  {level !== undefined && barColor !== undefined && (
+                    <LevelBar level={level} color={barColor} />
+                  )}
+                </View>
+              ))}
             </View>
           </View>
 

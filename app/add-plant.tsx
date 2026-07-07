@@ -25,11 +25,12 @@ import ToxicitySeverityBar from '../components/ToxicitySeverityBar';
 import LevelBar from '../components/LevelBar';
 import CreateSpaceModal from '../components/CreateSpaceModal';
 
-type Phase = 'capture' | 'analyzing' | 'review';
+type Phase = 'capture' | 'analyzing' | 'review' | 'grass';
 
 interface DetectedPlant {
   name: string;
   species: string;
+  is_grass: boolean;
   wateringFrequency: 'daily' | 'weekly' | 'monthly';
   wateringDays: number;
   sunlight: 'low' | 'medium' | 'bright';
@@ -147,8 +148,13 @@ export default function AddPlantScreen() {
       });
       if (error) throw new Error(error.message);
       if (data?.error) throw new Error(data.error);
-      setDetected(data as DetectedPlant);
-      setPhase('review');
+      const d = data as DetectedPlant;
+      if (d.is_grass) {
+        setPhase('grass');
+      } else {
+        setDetected(d);
+        setPhase('review');
+      }
 
       // Meter the scan against the user's tier — fire and forget, not
       // gated on the user later saving/favouriting the result.
@@ -158,6 +164,17 @@ export default function AddPlantScreen() {
       setPhase('capture');
     }
   }, [router]);
+
+  const resetToCapture = useCallback(() => {
+    setPhase('capture');
+    setPhotoUri(null);
+    setCompressed(null);
+    setDetected(null);
+    setAnalyzeError(null);
+    setSaveError(null);
+    setFavourited(false);
+    setToastMessage(null);
+  }, []);
 
   const handleTakePhoto = useCallback(async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -389,6 +406,30 @@ export default function AddPlantScreen() {
           <Text style={styles.analyzingSubtitle}>AI is detecting species & care needs</Text>
         </View>
       </View>
+    );
+  }
+
+  // ── Grass detected ───────────────────────────────────────────────────────────
+  if (phase === 'grass') {
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <View style={styles.grassWrap}>
+          <Ionicons name="leaf" size={64} color={Colors.primary} style={{ opacity: 0.8 }} />
+          <Text style={styles.grassTitle}>Grass detected!</Text>
+          <Text style={styles.grassBody}>
+            Lawns get a different care plan than potted plants — mowing and fertilizing on their own schedule instead of watering and sunlight.
+          </Text>
+          <TouchableOpacity
+            style={[styles.saveBtn, { width: '100%' }]}
+            onPress={() => Alert.alert('Coming soon', 'Lawn care planning is coming soon!')}
+          >
+            <Text style={styles.saveBtnText}>Set up lawn care plan</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.retakeBtn} onPress={resetToCapture}>
+            <Text style={styles.retakeBtnText}>This isn't grass, rescan</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -667,6 +708,28 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     marginTop: Spacing.sm,
   },
   analyzingSubtitle: { fontSize: FontSize.sm, color: Colors.textSecondary },
+
+  // Grass detected
+  grassWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.xl,
+    gap: Spacing.md,
+  },
+  grassTitle: {
+    fontSize: FontSize.xl,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  grassBody: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: Spacing.sm,
+  },
 
   // Review
   reviewScroll: { paddingBottom: Spacing.xxl },
