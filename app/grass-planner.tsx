@@ -39,7 +39,7 @@ export default function GrassPlannerScreen() {
   const { Colors, FontSize } = useTheme();
   const styles = getStyles(Colors, FontSize);
   const router = useRouter();
-  const params = useLocalSearchParams<{ photoUri?: string; name?: string }>();
+  const params = useLocalSearchParams<{ photoUri?: string }>();
 
   const [step, setStep] = useState<Step>(1);
   const [lengthM, setLengthM] = useState(5);
@@ -85,7 +85,7 @@ export default function GrassPlannerScreen() {
         .from('plants')
         .insert({
           user_id: user.id,
-          name: params.name?.trim() || 'My Lawn',
+          name: 'My Lawn',
           is_grass: true,
           lawn_length_m: lengthM,
           lawn_width_m: widthM,
@@ -107,7 +107,7 @@ export default function GrassPlannerScreen() {
     } finally {
       setSaving(false);
     }
-  }, [sunExposure, lawnCondition, lengthM, widthM, areaM2, params.photoUri, params.name, router]);
+  }, [sunExposure, lawnCondition, lengthM, widthM, areaM2, params.photoUri, router]);
 
   const handleBack = useCallback(() => {
     if (step === 1) {
@@ -126,7 +126,7 @@ export default function GrassPlannerScreen() {
   const canContinue = step === 1 || (step === 2 ? sunExposure !== null : lawnCondition !== null);
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={handleBack}>
           <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />

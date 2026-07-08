@@ -50,8 +50,24 @@ const CONDITION_CAUSE: Record<Exclude<LawnCondition, 'healthy'>, Record<SunExpos
   },
 };
 
-export function getGrassInsight(sunExposure: SunExposure, lawnCondition: LawnCondition): string | null {
+// When real scan issues are available (from analyze-grass-health), they take
+// priority over the onboarding condition guess — a scan is more authoritative
+// than a self-reported condition from the setup wizard. Scanned issues render
+// as a bulleted list (each is already a distinct, specific problem); the
+// onboarding-guess fallback renders as a single flowing sentence.
+export type GrassInsight =
+  | { kind: 'scanned'; issues: string[] }
+  | { kind: 'template'; text: string };
+
+export function getGrassInsight(
+  sunExposure: SunExposure,
+  lawnCondition: LawnCondition,
+  scannedIssues?: string[] | null,
+): GrassInsight | null {
+  if (scannedIssues && scannedIssues.length > 0) {
+    return { kind: 'scanned', issues: scannedIssues };
+  }
   if (lawnCondition === 'healthy') return null;
   const cause = CONDITION_CAUSE[lawnCondition][sunExposure];
-  return `${cause} The watering schedule above already accounts for this.`;
+  return { kind: 'template', text: `${cause} The watering schedule above already accounts for this.` };
 }

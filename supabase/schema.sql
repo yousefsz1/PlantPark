@@ -438,10 +438,18 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.get_scan_status() TO authenticated;
 
--- Atomic +1 to the caller's scan count — mirrors increment_xp.
+-- Atomic +N to the caller's scan count — mirrors increment_xp. Defaults to
+-- +1 for regular single-photo scans; called with p_amount=3 for Lawn Health
+-- Scans (3 images in one Gemini call, roughly 3x the cost of a normal scan).
 -- Call from client after a successful AI identification:
--- supabase.rpc('increment_scan_count')
-CREATE OR REPLACE FUNCTION public.increment_scan_count()
+-- supabase.rpc('increment_scan_count') or supabase.rpc('increment_scan_count', { p_amount: 3 })
+--
+-- The original zero-arg version is dropped first since CREATE OR REPLACE
+-- can't change a function's parameter list — without the DROP, Postgres
+-- would end up with two overloaded functions instead of one.
+DROP FUNCTION IF EXISTS public.increment_scan_count();
+
+CREATE OR REPLACE FUNCTION public.increment_scan_count(p_amount INTEGER DEFAULT 1)
 RETURNS INTEGER
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -451,14 +459,14 @@ DECLARE
   new_count INTEGER;
 BEGIN
   UPDATE profiles
-    SET scan_count_current_period = scan_count_current_period + 1
+    SET scan_count_current_period = scan_count_current_period + p_amount
     WHERE id = auth.uid()
     RETURNING scan_count_current_period INTO new_count;
   RETURN new_count;
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.increment_scan_count() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.increment_scan_count(INTEGER) TO authenticated;
 
 NOTIFY pgrst, 'reload schema';
 
@@ -538,5 +546,58 @@ ALTER TABLE public.favourites
   ADD COLUMN IF NOT EXISTS health_diagnosis_issues TEXT,
   ADD COLUMN IF NOT EXISTS health_recommendation TEXT,
   ADD COLUMN IF NOT EXISTS health_checked_at TIMESTAMPTZ;
+
+NOTIFY pgrst, 'reload schema';
+
+-- ─── Plants & Favourites: Grass Planner (lawn care) ──────────────────────────
+-- Run directly by the user against the live DB (not captured here at the
+-- time); recorded retroactively to keep this accumulator accurate with the
+-- live schema. is_grass flags a plants/favourites row as a lawn rather than
+-- a normal plant, routing it to a distinct Grass Planner UI/care-plan flow.
+
+ALTER TABLE public.plants
+  ADD COLUMN IF NOT EXISTS is_grass BOOLEAN,
+  ADD COLUMN IF NOT EXISTS lawn_length_m NUMERIC,
+  ADD COLUMN IF NOT EXISTS lawn_width_m NUMERIC,
+  ADD COLUMN IF NOT EXISTS lawn_area_m2 NUMERIC,
+  ADD COLUMN IF NOT EXISTS sun_exposure TEXT,
+  ADD COLUMN IF NOT EXISTS lawn_condition TEXT,
+  ADD COLUMN IF NOT EXISTS fertilizing_frequency_days INTEGER,
+  ADD COLUMN IF NOT EXISTS last_fertilized_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS mowing_frequency_days INTEGER,
+  ADD COLUMN IF NOT EXISTS last_mowed_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS grass_health_issues JSONB;
+
+ALTER TABLE public.favourites
+  ADD COLUMN IF NOT EXISTS is_grass BOOLEAN,
+  ADD COLUMN IF NOT EXISTS lawn_length_m NUMERIC,
+  ADD COLUMN IF NOT EXISTS lawn_width_m NUMERIC,
+  ADD COLUMN IF NOT EXISTS lawn_area_m2 NUMERIC,
+  ADD COLUMN IF NOT EXISTS sun_exposure TEXT,
+  ADD COLUMN IF NOT EXISTS lawn_condition TEXT,
+  ADD COLUMN IF NOT EXISTS fertilizing_frequency_days INTEGER,
+  ADD COLUMN IF NOT EXISTS last_fertilized_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS mowing_frequency_days INTEGER,
+  ADD COLUMN IF NOT EXISTS last_mowed_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS grass_health_issues JSONB;
+
+NOTIFY pgrst, 'reload schema';
+
+-- ─── Plants: Lawn health scan score ───────────────────────────────────────────
+-- Written by the new analyze-grass-health edge function after a 3-photo
+-- guided scan. issues/tips reuse grass_health_issues and health_tips_pro
+-- (see above) — only the numeric score needed a new column. Plants-only
+-- (not favourites), matching the precedent set by calendar_event_id.
+
+ALTER TABLE public.plants
+  ADD COLUMN IF NOT EXISTS lawn_health_level SMALLINT
+    CHECK (lawn_health_level BETWEEN 1 AND 5);
+
+NOTIFY pgrst, 'reload schema';
+
+-- ─── Plants: Lawn health scan timestamp ──────────────────────────────────────
+
+ALTER TABLE public.plants
+  ADD COLUMN IF NOT EXISTS lawn_health_checked_at TIMESTAMPTZ;
 
 NOTIFY pgrst, 'reload schema';

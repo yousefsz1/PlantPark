@@ -5,10 +5,10 @@
     "version": "1.0.0",
     "scheme": "plantpark",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/icon-square.png",
     "userInterfaceStyle": "dark",
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/icon-square.png",
       "resizeMode": "contain",
       "backgroundColor": "#0D2818"
     },
@@ -18,10 +18,6 @@
     },
     "android": {
       "versionCode": 1,
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0D2818"
-      },
       "package": "com.plantpark.app",
       "permissions": [
         "android.permission.CAMERA",

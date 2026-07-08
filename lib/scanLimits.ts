@@ -45,10 +45,12 @@ export async function getScanStatus(): Promise<ScanStatus | null> {
 }
 
 // Fire-and-forget after a successful AI identification — never throws.
-export async function incrementScanCount(): Promise<void> {
+// amount defaults to 1 (a regular single-photo scan); Lawn Health Scans pass
+// 3, since they send 3 images in one Gemini call.
+export async function incrementScanCount(amount: number = 1): Promise<void> {
   try {
-    await supabase.rpc('increment_scan_count');
+    await supabase.rpc('increment_scan_count', { p_amount: amount });
   } catch {
-    // Non-fatal — worst case the count under-reports by one scan.
+    // Non-fatal — worst case the count under-reports.
   }
 }

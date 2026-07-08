@@ -48,6 +48,8 @@ export type Database = {
           mowing_frequency_days: number | null;
           last_mowed_at: string | null;
           grass_health_issues: string[] | null;
+          lawn_health_level: number | null;
+          lawn_health_checked_at: string | null;
         };
         Insert: {
           id?: string;
@@ -95,6 +97,8 @@ export type Database = {
           mowing_frequency_days?: number | null;
           last_mowed_at?: string | null;
           grass_health_issues?: string[] | null;
+          lawn_health_level?: number | null;
+          lawn_health_checked_at?: string | null;
         };
         Update: {
           id?: string;
@@ -142,6 +146,8 @@ export type Database = {
           mowing_frequency_days?: number | null;
           last_mowed_at?: string | null;
           grass_health_issues?: string[] | null;
+          lawn_health_level?: number | null;
+          lawn_health_checked_at?: string | null;
         };
         Relationships: [
           {
@@ -417,7 +423,7 @@ export type Database = {
         Returns: unknown;
       };
       increment_scan_count: {
-        Args: Record<string, never>;
+        Args: { p_amount?: number };
         Returns: number;
       };
     };

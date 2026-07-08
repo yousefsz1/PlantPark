@@ -124,7 +124,6 @@ export default function ScanScreen() {
   const [photoUri, setPhotoUri]         = useState<string | null>(null);
   const [photoBase64, setPhotoBase64]   = useState<string | null>(null);
   const [result, setResult]             = useState<ScanResult | null>(null);
-  const [grassName, setGrassName]       = useState<string | null>(null);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [xpTotal, setXpTotal]           = useState<number | null>(null);
   const [saved, setSaved]               = useState(false);
@@ -199,7 +198,6 @@ export default function ScanScreen() {
       };
 
       if (d.is_grass) {
-        setGrassName(d.name ?? null);
         setPhase('grass');
       } else {
         setResult({
@@ -482,7 +480,6 @@ export default function ScanScreen() {
     setPhotoUri(null);
     setPhotoBase64(null);
     setResult(null);
-    setGrassName(null);
     setAnalyzeError(null);
     setXpTotal(null);
     setSaved(false);
@@ -538,31 +535,36 @@ export default function ScanScreen() {
   // ─── Grass detected ────────────────────────────────────────────────────────
   if (phase === 'grass') {
     return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
-        <View style={styles.permissionWrap}>
-          <Image
-            source={require('../../assets/illustrations/grass-detected.png')}
-            style={styles.grassIllustration}
-            resizeMode="contain"
-          />
-          <Text style={styles.permissionTitle}>Grass detected!</Text>
-          <Text style={styles.permissionBody}>
-            Lawns get a different care plan than potted plants — mowing and fertilizing on their own schedule instead of watering and sunlight.
-          </Text>
-          <TouchableOpacity
-            style={styles.primaryBtn}
-            onPress={() => router.push({
-              pathname: '/grass-planner',
-              params: { photoUri: photoUri ?? '', name: grassName ?? '' },
-            })}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.primaryBtnText}>Set up lawn care plan</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.secondaryBtn} onPress={resetScan} activeOpacity={0.7}>
-            <Text style={styles.secondaryBtnText}>This isn't grass, rescan</Text>
-          </TouchableOpacity>
-        </View>
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <ScrollView contentContainerStyle={styles.grassScrollContent} showsVerticalScrollIndicator={false}>
+          {photoUri ? (
+            <Image source={{ uri: photoUri }} style={styles.grassPhoto} resizeMode="cover" />
+          ) : null}
+          <View style={styles.grassContentWrap}>
+            <Image
+              source={require('../../assets/illustrations/grass-detected.png')}
+              style={styles.grassIllustration}
+              resizeMode="contain"
+            />
+            <Text style={styles.permissionTitle}>Grass detected!</Text>
+            <Text style={styles.permissionBody}>
+              Lawns get a different care plan than potted plants — mowing and fertilizing on their own schedule instead of watering and sunlight.
+            </Text>
+            <TouchableOpacity
+              style={styles.primaryBtn}
+              onPress={() => router.push({
+                pathname: '/grass-planner',
+                params: { photoUri: photoUri ?? '' },
+              })}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.primaryBtnText}>Set up lawn care plan</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.secondaryBtn} onPress={resetScan} activeOpacity={0.7}>
+              <Text style={styles.secondaryBtnText}>This isn't grass, rescan</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -871,7 +873,20 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     padding: Spacing.xl,
     gap: Spacing.md,
   },
-  grassIllustration: { width: 200, height: 140 },
+  grassScrollContent: { flexGrow: 1 },
+  grassPhoto: {
+    width: '100%',
+    height: 220,
+    borderRadius: Radius.xl,
+  },
+  grassContentWrap: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.xl,
+    gap: Spacing.md,
+  },
+  grassIllustration: { width: 140, height: 80 },
   permissionTitle: {
     fontSize: FontSize.xl,
     fontWeight: '700',

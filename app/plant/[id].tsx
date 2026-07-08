@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -28,6 +28,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import ToxicitySeverityBar from '../../components/ToxicitySeverityBar';
 import LevelBar from '../../components/LevelBar';
 import CreateSpaceModal from '../../components/CreateSpaceModal';
+import PhotoViewerModal, { type GalleryPhoto } from '../../components/PhotoViewerModal';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PHOTO_COL_SIZE = (SCREEN_WIDTH - Spacing.md * 2 - Spacing.sm * 2) / 3;
@@ -50,23 +51,6 @@ function getHealthStatusConfig(Colors: ColorPalette): Record<HealthDiagnosisStat
     needs_attention: { label: 'Needs Attention',  icon: 'warning',          color: Colors.warning, bg: 'rgba(243,156,18,0.1)' },
     critical:        { label: 'Critical',         icon: 'alert-circle',     color: Colors.danger,  bg: 'rgba(231,76,60,0.1)' },
   };
-}
-
-// Full-screen photo viewer — merges the hero photo (plants.photo_url, set once
-// at creation) with plant_photos rows, since the hero photo is never itself
-// inserted into plant_photos and would otherwise be missing from the gallery.
-type GalleryPhoto = { id: string; photo_url: string; created_at: string };
-
-function formatPhotoDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-function getPhotoLabel(photos: GalleryPhoto[], index: number): string {
-  const date = formatPhotoDate(photos[index].created_at);
-  if (photos.length === 2) {
-    return `${date} · ${index === 0 ? 'First photo' : 'Latest photo'}`;
-  }
-  return date;
 }
 
 function getWateringStatus(task: CareTask | null, Colors: ColorPalette): {
@@ -162,7 +146,6 @@ export default function PlantDetailScreen() {
   const [photoViewerVisible, setPhotoViewerVisible] = useState(false);
   const [photoViewerIndex, setPhotoViewerIndex] = useState(0);
   const hasLoaded = useRef(false);
-  const photoViewerScrollRef = useRef<ScrollView>(null);
 
   const fetchData = useCallback(async () => {
     if (!plantId) return;
@@ -202,14 +185,6 @@ export default function PlantDetailScreen() {
       });
     }, [fetchData]),
   );
-
-  useEffect(() => {
-    if (photoViewerVisible) {
-      requestAnimationFrame(() => {
-        photoViewerScrollRef.current?.scrollTo({ x: photoViewerIndex * SCREEN_WIDTH, animated: false });
-      });
-    }
-  }, [photoViewerVisible]);
 
   // ── Delete plant ─────────────────────────────────────────────────────────────
   const handleDeletePlant = useCallback(() => {
@@ -971,56 +946,12 @@ export default function PlantDetailScreen() {
 
       </ScrollView>
 
-      <Modal
+      <PhotoViewerModal
         visible={photoViewerVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPhotoViewerVisible(false)}
-      >
-        <View style={styles.photoViewerBackdrop}>
-          <TouchableOpacity
-            style={styles.photoViewerCloseBtn}
-            onPress={() => setPhotoViewerVisible(false)}
-          >
-            <Ionicons name="close" size={26} color="#FFFFFF" />
-          </TouchableOpacity>
-
-          <ScrollView
-            ref={photoViewerScrollRef}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            onMomentumScrollEnd={(e) => {
-              const idx = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
-              setPhotoViewerIndex(idx);
-            }}
-          >
-            {galleryPhotos.map((photo) => (
-              <View key={photo.id} style={styles.photoViewerSlide}>
-                <Image source={{ uri: photo.photo_url }} style={styles.photoViewerImage} resizeMode="contain" />
-              </View>
-            ))}
-          </ScrollView>
-
-          <View style={styles.photoViewerFooter}>
-            {galleryPhotos[photoViewerIndex] ? (
-              <Text style={styles.photoViewerLabel}>
-                {getPhotoLabel(galleryPhotos, photoViewerIndex)}
-              </Text>
-            ) : null}
-            {galleryPhotos.length > 1 && (
-              <View style={styles.photoViewerDots}>
-                {galleryPhotos.map((photo, i) => (
-                  <View
-                    key={photo.id}
-                    style={[styles.photoViewerDot, i === photoViewerIndex && styles.photoViewerDotActive]}
-                  />
-                ))}
-              </View>
-            )}
-          </View>
-        </View>
-      </Modal>
+        photos={galleryPhotos}
+        initialIndex={photoViewerIndex}
+        onClose={() => setPhotoViewerVisible(false)}
+      />
 
       <Modal
         visible={showSpacePicker}
@@ -1571,52 +1502,5 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     backgroundColor: 'rgba(46,204,113,0.06)',
   },
   addPhotoBtnText: { fontSize: FontSize.md, fontWeight: '600', color: Colors.primary },
-
-  // Full-screen photo viewer
-  photoViewerBackdrop: { flex: 1, backgroundColor: '#000000' },
-  photoViewerCloseBtn: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 56 : 24,
-    right: Spacing.md,
-    zIndex: 1,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  photoViewerSlide: { width: SCREEN_WIDTH, flex: 1, justifyContent: 'center', alignItems: 'center' },
-  photoViewerImage: { width: SCREEN_WIDTH, height: '100%' },
-  photoViewerFooter: {
-    position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 48 : 24,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    gap: Spacing.sm,
-  },
-  photoViewerLabel: {
-    fontSize: FontSize.sm,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 6,
-    borderRadius: Radius.full,
-  },
-  photoViewerDots: { flexDirection: 'row', gap: 6 },
-  photoViewerDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.4)',
-  },
-  photoViewerDotActive: {
-    backgroundColor: '#FFFFFF',
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
   });
 }

@@ -19,6 +19,8 @@ export default function PlantCard({ plant, displayHealth }: { plant: Plant; disp
   const styles = getStyles(Colors, FontSize);
   const health = displayHealth ?? plant.health_percent;
   const { icon: moodIcon, color } = getMood(health, Colors);
+  const lawnHealthPct = plant.lawn_health_level != null ? Math.round((plant.lawn_health_level / 5) * 100) : null;
+  const lawnColor = lawnHealthPct != null ? getMood(lawnHealthPct, Colors).color : Colors.textMuted;
 
   return (
     <View style={styles.plantCard}>
@@ -37,7 +39,8 @@ export default function PlantCard({ plant, displayHealth }: { plant: Plant; disp
           </View>
           {plant.is_grass ? (
             <View style={styles.lawnBadge}>
-              <Text style={styles.lawnBadgeText}>🌱 Lawn</Text>
+              <Image source={require('../assets/illustrations/grass-icon.png')} style={styles.lawnBadgeIcon} resizeMode="contain" />
+              <Text style={styles.lawnBadgeText}>Lawn</Text>
             </View>
           ) : (
             <View style={styles.levelBadge}>
@@ -45,7 +48,18 @@ export default function PlantCard({ plant, displayHealth }: { plant: Plant; disp
             </View>
           )}
         </View>
-        {!plant.is_grass && (
+        {plant.is_grass ? (
+          lawnHealthPct != null ? (
+            <View style={styles.healthRow}>
+              <View style={styles.healthBarBg}>
+                <View style={[styles.healthBarFill, { width: `${lawnHealthPct}%`, backgroundColor: lawnColor }]} />
+              </View>
+              <Text style={[styles.healthPct, { color: lawnColor }]}>{lawnHealthPct}%</Text>
+            </View>
+          ) : (
+            <Text style={styles.notScannedText}>Not yet scanned</Text>
+          )
+        ) : (
           <View style={styles.healthRow}>
             <View style={styles.healthBarBg}>
               <View style={[styles.healthBarFill, { width: `${health}%`, backgroundColor: color }]} />
@@ -95,6 +109,9 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     },
     levelBadgeText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.textPrimary },
     lawnBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
       backgroundColor: 'rgba(46,204,113,0.12)',
       borderRadius: Radius.full,
       paddingHorizontal: 8,
@@ -102,7 +119,9 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
       borderWidth: 1,
       borderColor: 'rgba(46,204,113,0.3)',
     },
+    lawnBadgeIcon: { width: 16, height: 16 },
     lawnBadgeText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.primary },
+    notScannedText: { fontSize: FontSize.xs, color: Colors.textMuted },
     healthRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
     healthBarBg: {
       flex: 1,
