@@ -417,7 +417,11 @@ export default function AddPlantScreen() {
     return (
       <SafeAreaView style={styles.root} edges={['top']}>
         <View style={styles.grassWrap}>
-          <Ionicons name="leaf" size={64} color={Colors.primary} style={{ opacity: 0.8 }} />
+          <Image
+            source={require('../assets/illustrations/grass-detected.png')}
+            style={styles.grassIllustration}
+            resizeMode="contain"
+          />
           <Text style={styles.grassTitle}>Grass detected!</Text>
           <Text style={styles.grassBody}>
             Lawns get a different care plan than potted plants — mowing and fertilizing on their own schedule instead of watering and sunlight.
@@ -723,6 +727,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     padding: Spacing.xl,
     gap: Spacing.md,
   },
+  grassIllustration: { width: 200, height: 140 },
   grassTitle: {
     fontSize: FontSize.xl,
     fontWeight: '700',

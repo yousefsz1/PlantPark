@@ -14,12 +14,11 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import Slider from '@react-native-community/slider';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../lib/supabase';
+import { getFertilizingPlan, getMowingPlan, type SunExposure, type LawnCondition } from '../lib/grassCare';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../constants/theme';
 import { useTheme } from '../contexts/ThemeContext';
 
 type Step = 1 | 2 | 3;
-type SunExposure = 'full_sun' | 'partial_shade' | 'full_shade';
-type LawnCondition = 'healthy' | 'patchy' | 'yellowing' | 'unsure';
 
 const SUN_OPTIONS: { value: SunExposure; label: string; icon: string }[] = [
   { value: 'full_sun', label: 'Full Sun', icon: 'sunny' },
@@ -94,6 +93,8 @@ export default function GrassPlannerScreen() {
           sun_exposure: sunExposure,
           lawn_condition: lawnCondition,
           photo_url: photoUrl,
+          fertilizing_frequency_days: getFertilizingPlan(areaM2).intervalDays,
+          mowing_frequency_days: getMowingPlan(lawnCondition).intervalDays,
         })
         .select('id')
         .single();

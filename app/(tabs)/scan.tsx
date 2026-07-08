@@ -540,7 +540,11 @@ export default function ScanScreen() {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.permissionWrap}>
-          <Ionicons name="leaf" size={64} color={Colors.primary} style={{ opacity: 0.8 }} />
+          <Image
+            source={require('../../assets/illustrations/grass-detected.png')}
+            style={styles.grassIllustration}
+            resizeMode="contain"
+          />
           <Text style={styles.permissionTitle}>Grass detected!</Text>
           <Text style={styles.permissionBody}>
             Lawns get a different care plan than potted plants — mowing and fertilizing on their own schedule instead of watering and sunlight.
@@ -867,6 +871,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     padding: Spacing.xl,
     gap: Spacing.md,
   },
+  grassIllustration: { width: 200, height: 140 },
   permissionTitle: {
     fontSize: FontSize.xl,
     fontWeight: '700',
