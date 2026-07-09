@@ -1,0 +1,2 @@
+[functions.check-rainfall]
+verify_jwt = false

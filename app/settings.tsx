@@ -136,6 +136,7 @@ export default function SettingsScreen() {
 
         <Text style={styles.sectionTitle}>App</Text>
         <SettingsRow icon="color-palette-outline" label="Display" onPress={() => router.push('/display')} />
+        <SettingsRow icon="location-outline" label="Location" onPress={() => router.push('/location-settings')} />
         <SettingsRow
           icon="log-out-outline"
           label="Sign Out"

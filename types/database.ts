@@ -269,6 +269,8 @@ export type Database = {
           xp_reward: number;
           interval_days: number;
           created_at: string;
+          completed_via: 'user' | 'rain';
+          rain_mm: number | null;
         };
         Insert: {
           id?: string;
@@ -280,6 +282,8 @@ export type Database = {
           xp_reward?: number;
           interval_days?: number;
           created_at?: string;
+          completed_via?: 'user' | 'rain';
+          rain_mm?: number | null;
         };
         Update: {
           id?: string;
@@ -291,6 +295,8 @@ export type Database = {
           xp_reward?: number;
           interval_days?: number;
           created_at?: string;
+          completed_via?: 'user' | 'rain';
+          rain_mm?: number | null;
         };
         Relationships: [
           {
@@ -367,6 +373,9 @@ export type Database = {
           membership_tier: 'free' | 'basic' | 'pro';
           scan_count_current_period: number;
           scan_period_reset_at: string;
+          latitude: number | null;
+          longitude: number | null;
+          location_updated_at: string | null;
         };
         Insert: {
           id: string;
@@ -375,6 +384,9 @@ export type Database = {
           membership_tier?: 'free' | 'basic' | 'pro';
           scan_count_current_period?: number;
           scan_period_reset_at?: string;
+          latitude?: number | null;
+          longitude?: number | null;
+          location_updated_at?: string | null;
         };
         Update: {
           id?: string;
@@ -383,6 +395,9 @@ export type Database = {
           membership_tier?: 'free' | 'basic' | 'pro';
           scan_count_current_period?: number;
           scan_period_reset_at?: string;
+          latitude?: number | null;
+          longitude?: number | null;
+          location_updated_at?: string | null;
         };
         Relationships: [];
       };

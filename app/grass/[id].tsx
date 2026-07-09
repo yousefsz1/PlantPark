@@ -7,7 +7,7 @@ import { supabase } from '../../lib/supabase';
 import { getWateringPlan, getFertilizingPlan, getMowingPlan, getGrassInsight, type SunExposure, type LawnCondition } from '../../lib/grassCare';
 import { WATER_COLOR } from '../../lib/careLevels';
 import { getScanStatus } from '../../lib/scanLimits';
-import type { Plant, PlantPhoto } from '../../types/database';
+import type { Plant, PlantPhoto, CareTask } from '../../types/database';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import LevelBar from '../../components/LevelBar';
@@ -58,22 +58,48 @@ export default function GrassDetailScreen() {
 
   const [plant, setPlant] = useState<Plant | null>(null);
   const [progressPhotos, setProgressPhotos] = useState<PlantPhoto[]>([]);
+  const [pendingWateringTask, setPendingWateringTask] = useState<CareTask | null>(null);
+  const [lastCompletedWateringTask, setLastCompletedWateringTask] = useState<CareTask | null>(null);
   const [loading, setLoading] = useState(true);
+  const [wateringAnyway, setWateringAnyway] = useState(false);
   const [photoViewerVisible, setPhotoViewerVisible] = useState(false);
   const [photoViewerIndex, setPhotoViewerIndex] = useState(0);
 
+  const fetchData = useCallback(async () => {
+    if (!plantId) return;
+    const [plantRes, photosRes, pendingRes, lastCompletedRes] = await Promise.all([
+      supabase.from('plants').select('*').eq('id', plantId).single(),
+      supabase.from('plant_photos').select('*').eq('plant_id', plantId).order('created_at', { ascending: false }),
+      supabase
+        .from('care_tasks')
+        .select('*')
+        .eq('plant_id', plantId)
+        .eq('task_type', 'watering')
+        .is('completed_at', null)
+        .order('due_date')
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from('care_tasks')
+        .select('*')
+        .eq('plant_id', plantId)
+        .eq('task_type', 'watering')
+        .not('completed_at', 'is', null)
+        .order('completed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    setPlant(plantRes.data);
+    setProgressPhotos((photosRes.data ?? []) as PlantPhoto[]);
+    setPendingWateringTask(pendingRes.data);
+    setLastCompletedWateringTask(lastCompletedRes.data);
+    setLoading(false);
+  }, [plantId]);
+
   useFocusEffect(
     useCallback(() => {
-      if (!plantId) return;
-      Promise.all([
-        supabase.from('plants').select('*').eq('id', plantId).single(),
-        supabase.from('plant_photos').select('*').eq('plant_id', plantId).order('created_at', { ascending: false }),
-      ]).then(([plantRes, photosRes]) => {
-        setPlant(plantRes.data);
-        setProgressPhotos((photosRes.data ?? []) as PlantPhoto[]);
-        setLoading(false);
-      });
-    }, [plantId]),
+      fetchData();
+    }, [fetchData]),
   );
 
   if (loading) {
@@ -101,7 +127,10 @@ export default function GrassDetailScreen() {
   const lawnCondition = (plant.lawn_condition ?? 'healthy') as LawnCondition;
   const areaM2 = plant.lawn_area_m2 ?? 0;
 
-  const watering = getWateringPlan(sunExposure, lawnCondition, areaM2);
+  const liveWatering = getWateringPlan(sunExposure, lawnCondition, areaM2);
+  const wateringIntervalDays = pendingWateringTask?.interval_days ?? liveWatering.intervalDays;
+  const watering = { intervalDays: wateringIntervalDays, liters: liveWatering.liters };
+  const wateredByRain = lastCompletedWateringTask?.completed_via === 'rain';
   const fertilizing = getFertilizingPlan(areaM2);
   const mowing = getMowingPlan(lawnCondition);
   const fertilizingIntervalDays = plant.fertilizing_frequency_days ?? fertilizing.intervalDays;
@@ -120,6 +149,20 @@ export default function GrassDetailScreen() {
     const idx = galleryPhotos.findIndex(p => p.id === photoId);
     setPhotoViewerIndex(Math.max(0, idx));
     setPhotoViewerVisible(true);
+  };
+
+  const handleWaterAnyway = async () => {
+    if (!pendingWateringTask) return;
+    setWateringAnyway(true);
+    try {
+      const { error } = await supabase.rpc('complete_care_task', { task_id: pendingWateringTask.id });
+      if (error) throw error;
+      await fetchData();
+    } catch (err) {
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to mark as watered');
+    } finally {
+      setWateringAnyway(false);
+    }
   };
 
   const handleScanPress = async () => {
@@ -207,6 +250,24 @@ export default function GrassDetailScreen() {
           <Text style={styles.planCardValue}>
             Every {watering.intervalDays} day{watering.intervalDays === 1 ? '' : 's'} · {watering.liters} L each time
           </Text>
+
+          {wateredByRain ? (
+            <View style={styles.rainBanner}>
+              <Ionicons name="rainy" size={16} color={WATER_COLOR} />
+              <Text style={styles.rainBannerText}>
+                Watered by rain — {lastCompletedWateringTask?.rain_mm}mm detected
+              </Text>
+              {pendingWateringTask ? (
+                <TouchableOpacity onPress={handleWaterAnyway} disabled={wateringAnyway}>
+                  {wateringAnyway ? (
+                    <ActivityIndicator size="small" color={WATER_COLOR} />
+                  ) : (
+                    <Text style={styles.rainBannerAction}>Water anyway</Text>
+                  )}
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.planCard}>
@@ -423,6 +484,19 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     planCardValue: { fontSize: FontSize.sm, color: Colors.textSecondary },
     planCardNote: { fontSize: FontSize.xs, color: Colors.warning, marginTop: 4 },
     lastScannedText: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: Spacing.sm },
+
+    rainBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: Spacing.xs,
+      marginTop: Spacing.sm,
+      paddingTop: Spacing.sm,
+      borderTopWidth: 1,
+      borderTopColor: Colors.border,
+    },
+    rainBannerText: { flex: 1, fontSize: FontSize.xs, color: WATER_COLOR, fontWeight: '600' },
+    rainBannerAction: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.primary },
 
     insightCard: {
       borderRadius: Radius.lg,

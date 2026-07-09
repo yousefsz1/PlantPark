@@ -64,6 +64,12 @@
           "image": "./assets/icon-square.png",
           "resizeMode": "contain"
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Plant Park uses your location to check local rainfall so it can skip watering reminders after it rains."
+        }
       ]
     ],
     "experiments": {

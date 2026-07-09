@@ -132,6 +132,7 @@ export default function PlantDetailScreen() {
 
   const [plant, setPlant]                 = useState<Plant | null>(null);
   const [wateringTask, setWateringTask]   = useState<CareTask | null>(null);
+  const [lastCompletedWateringTask, setLastCompletedWateringTask] = useState<CareTask | null>(null);
   const [progressPhotos, setProgressPhotos] = useState<PlantPhoto[]>([]);
   const [totalXP, setTotalXP]             = useState(0);
   const [spaces, setSpaces]               = useState<Space[]>([]);
@@ -150,7 +151,7 @@ export default function PlantDetailScreen() {
   const fetchData = useCallback(async () => {
     if (!plantId) return;
 
-    const [plantRes, taskRes, photosRes, profileRes, spacesRes] = await Promise.all([
+    const [plantRes, taskRes, lastCompletedRes, photosRes, profileRes, spacesRes] = await Promise.all([
       supabase.from('plants').select('*').eq('id', plantId).single(),
       supabase
         .from('care_tasks')
@@ -160,6 +161,15 @@ export default function PlantDetailScreen() {
         .is('completed_at', null)
         .order('due_date')
         .limit(1),
+      supabase
+        .from('care_tasks')
+        .select('*')
+        .eq('plant_id', plantId)
+        .eq('task_type', 'watering')
+        .not('completed_at', 'is', null)
+        .order('completed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
       supabase
         .from('plant_photos')
         .select('*')
@@ -171,6 +181,7 @@ export default function PlantDetailScreen() {
 
     if (plantRes.data)  setPlant(plantRes.data);
     setWateringTask(taskRes.data?.[0] ?? null);
+    setLastCompletedWateringTask(lastCompletedRes.data);
     setProgressPhotos((photosRes.data ?? []) as PlantPhoto[]);
     setTotalXP(profileRes.data?.total_xp ?? 0);
     setSpaces(spacesRes.data ?? []);
@@ -677,6 +688,23 @@ export default function PlantDetailScreen() {
                 />
               </View>
             )}
+            {lastCompletedWateringTask?.completed_via === 'rain' ? (
+              <View style={styles.rainBanner}>
+                <Ionicons name="rainy" size={16} color={WATER_COLOR} />
+                <Text style={styles.rainBannerText}>
+                  Watered by rain — {lastCompletedWateringTask.rain_mm}mm detected
+                </Text>
+                {wateringTask ? (
+                  <TouchableOpacity onPress={handleMarkWatered} disabled={markingWatered}>
+                    {markingWatered ? (
+                      <ActivityIndicator size="small" color={WATER_COLOR} />
+                    ) : (
+                      <Text style={styles.rainBannerAction}>Water anyway</Text>
+                    )}
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : null}
             {wateringTask ? (
               watering.urgent ? (
                 <TouchableOpacity
@@ -1400,6 +1428,19 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     height: '100%',
     borderRadius: Radius.full,
   },
+  rainBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: Spacing.xs,
+    marginTop: Spacing.sm,
+    paddingTop: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    width: '100%',
+  },
+  rainBannerText: { flex: 1, fontSize: FontSize.xs, color: WATER_COLOR, fontWeight: '600' },
+  rainBannerAction: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.primary },
   wateredBtn: {
     flexDirection: 'row',
     alignItems: 'center',
