@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Share } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -8,7 +8,15 @@ import { getScanStatus, type MembershipTier } from '../../lib/scanLimits';
 import { getLevel, xpToNextLevel } from '../../lib/levels';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
+import { APP_DOWNLOAD_URL } from '../../constants/links';
 import type { User } from '@supabase/supabase-js';
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0][0].toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
 
 function getTierBadgeConfig(Colors: ColorPalette): Record<MembershipTier, { label: string; icon: string; color: string; bg: string }> {
   return {
@@ -28,11 +36,11 @@ const BADGES = [
 ] as const;
 
 const MENU_ITEMS = [
-  { icon: 'card-outline',          label: 'Membership',   route: '/membership' },
-  { icon: 'settings-outline',      label: 'Settings',      route: '/settings' },
-  { icon: 'notifications-outline', label: 'Reminders',     route: undefined },
-  { icon: 'share-social-outline',  label: 'Share Profile', route: undefined },
-  { icon: 'help-circle-outline',   label: 'Help & FAQ',    route: undefined },
+  { icon: 'card-outline',          label: 'Membership',   route: '/membership', action: undefined },
+  { icon: 'settings-outline',      label: 'Settings',      route: '/settings',   action: undefined },
+  { icon: 'notifications-outline', label: 'Reminders',     route: undefined,     action: undefined },
+  { icon: 'share-social-outline',  label: 'Share App',     route: undefined,     action: 'share' as const },
+  { icon: 'help-circle-outline',   label: 'Help & FAQ',    route: '/help',       action: undefined },
 ] as const;
 
 export default function ProfileScreen() {
@@ -53,6 +61,13 @@ export default function ProfileScreen() {
       });
     }, []),
   );
+
+  const handleShareApp = useCallback(() => {
+    Share.share({
+      message: `Check out Plant Park — the app I use to take care of my plants and lawn: ${APP_DOWNLOAD_URL}`,
+      url: APP_DOWNLOAD_URL,
+    }).catch(() => {});
+  }, []);
 
   async function handleSignOut() {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -82,7 +97,7 @@ export default function ProfileScreen() {
         {/* Avatar & name */}
         <View style={styles.avatarSection}>
           <View style={styles.avatar}>
-            <Ionicons name="person" size={40} color={Colors.primary} />
+            <Text style={styles.avatarInitials}>{getInitials(displayName)}</Text>
           </View>
           <Text style={styles.username}>{displayName}</Text>
           <Text style={styles.userEmail}>{displayEmail}</Text>
@@ -101,7 +116,11 @@ export default function ProfileScreen() {
         </View>
 
         {/* XP progress */}
-        <View style={styles.xpCard}>
+        <TouchableOpacity
+          style={styles.xpCard}
+          activeOpacity={0.85}
+          onPress={() => router.push({ pathname: '/rank-roadmap', params: { totalXP: String(totalXP) } })}
+        >
           <View style={styles.xpRow}>
             <Text style={styles.xpLabel}>{totalXP.toLocaleString()} XP</Text>
             <Text style={styles.xpNext}>
@@ -111,7 +130,7 @@ export default function ProfileScreen() {
           <View style={styles.xpBarBg}>
             <View style={[styles.xpBarFill, { width: `${pct}%` }]} />
           </View>
-        </View>
+        </TouchableOpacity>
 
         {/* Badges */}
         <Text style={styles.sectionTitle}>Badges</Text>
@@ -136,7 +155,11 @@ export default function ProfileScreen() {
           <TouchableOpacity
             key={item.label}
             style={styles.menuRow}
-            onPress={item.route ? () => router.push(item.route) : undefined}
+            onPress={
+              item.action === 'share' ? handleShareApp :
+              item.route ? () => router.push(item.route) :
+              undefined
+            }
           >
             <Ionicons name={item.icon as any} size={20} color={Colors.textSecondary} />
             <Text style={styles.menuLabel}>{item.label}</Text>
@@ -173,13 +196,12 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     width: 88,
     height: 88,
     borderRadius: Radius.full,
-    backgroundColor: Colors.surfaceElevated,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: Spacing.sm,
-    borderWidth: 2,
-    borderColor: Colors.primary,
   },
+  avatarInitials: { fontSize: FontSize.xxl, fontWeight: '700', color: '#FFFFFF' },
   username: { fontSize: FontSize.xl, fontWeight: '700', color: Colors.textPrimary },
   userEmail: { fontSize: FontSize.sm, color: Colors.textMuted, marginTop: 2, marginBottom: 6 },
   rankBadge: {
@@ -275,7 +297,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     borderRadius: Radius.md,
     borderWidth: 1,
     borderColor: Colors.danger,
-    backgroundColor: '#1A0A0A',
+    backgroundColor: 'rgba(231,76,60,0.1)',
   },
   signOutText: { fontSize: FontSize.md, fontWeight: '600', color: Colors.danger },
   });

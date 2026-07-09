@@ -502,7 +502,12 @@ export default function GardenScreen() {
         </View>
 
         {/* Level bar */}
-        <LevelBar totalXP={totalXP} />
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => router.push({ pathname: '/rank-roadmap', params: { totalXP: String(totalXP) } })}
+        >
+          <LevelBar totalXP={totalXP} />
+        </TouchableOpacity>
 
         {/* Content */}
         {loading ? (

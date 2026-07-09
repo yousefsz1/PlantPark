@@ -52,9 +52,25 @@ export default function SettingsScreen() {
   const router = useRouter();
   const [wateringReminders, setWateringReminders] = useState(true);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   const appVersion = Constants.expoConfig?.version;
   const buildNumber = Constants.expoConfig?.android?.versionCode;
+
+  function handleSignOut() {
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: async () => {
+          setSigningOut(true);
+          await supabase.auth.signOut();
+          // Navigation back to auth happens automatically via onAuthStateChange in _layout.tsx
+        },
+      },
+    ]);
+  }
 
   function handleDeleteAccount() {
     Alert.alert(
@@ -120,7 +136,14 @@ export default function SettingsScreen() {
 
         <Text style={styles.sectionTitle}>App</Text>
         <SettingsRow icon="color-palette-outline" label="Display" onPress={() => router.push('/display')} />
-        <SettingsRow icon="log-out-outline" label="Sign Out" onPress={() => comingSoon('Sign Out')} />
+        <SettingsRow
+          icon="log-out-outline"
+          label="Sign Out"
+          destructive
+          disabled={signingOut}
+          onPress={handleSignOut}
+          right={signingOut ? <ActivityIndicator size="small" color={Colors.danger} /> : undefined}
+        />
 
         <Text style={styles.sectionTitle}>Legal</Text>
         <SettingsRow icon="document-text-outline" label="Privacy Policy" onPress={() => comingSoon('Privacy Policy')} />
@@ -192,7 +215,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  rowDestructive: { borderColor: Colors.danger, backgroundColor: '#1A0A0A' },
+  rowDestructive: { borderColor: Colors.danger, backgroundColor: 'rgba(231,76,60,0.1)' },
   rowBusy: { opacity: 0.6 },
   rowLabel: { flex: 1, fontSize: FontSize.md, color: Colors.textPrimary },
   rowLabelDestructive: { color: Colors.danger },

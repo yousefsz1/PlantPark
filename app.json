@@ -7,14 +7,12 @@
     "orientation": "portrait",
     "icon": "./assets/icon-square.png",
     "userInterfaceStyle": "dark",
-    "splash": {
-      "image": "./assets/icon-square.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0D2818"
-    },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.plantpark.app"
+      "bundleIdentifier": "com.plantpark.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "versionCode": 1,
@@ -57,6 +55,14 @@
         "expo-calendar",
         {
           "calendarPermission": "Plant Park uses calendar access to add optional watering reminders for your plants."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0D2818",
+          "image": "./assets/icon-square.png",
+          "resizeMode": "contain"
         }
       ]
     ],
