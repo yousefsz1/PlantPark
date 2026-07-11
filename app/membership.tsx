@@ -35,6 +35,8 @@ const TIERS: TierInfo[] = [
     benefits: [
       'Everything in Free',
       '10x more scans than Free',
+      'Lawn & Grass Care Planning (AI health scans + care plans)',
+      'Smart Watering (rain-aware auto-watering)',
       'Priority customer support',
     ],
   },

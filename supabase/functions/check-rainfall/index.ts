@@ -19,6 +19,38 @@ type Candidate = {
   longitude: number;
 };
 
+// Best-effort — looks up the user's push token and the plant's name, then
+// POSTs to Expo's push API. Never throws: a missing token, a lookup
+// failure, or a push-send failure should just mean no notification, not a
+// broken batch (the rain-completion itself already succeeded).
+async function sendRainWateredPush(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  plantId: string,
+): Promise<void> {
+  try {
+    const [{ data: profile }, { data: plant }] = await Promise.all([
+      supabase.from('profiles').select('push_token').eq('id', userId).maybeSingle(),
+      supabase.from('plants').select('name').eq('id', plantId).maybeSingle(),
+    ]);
+
+    const pushToken = profile?.push_token;
+    if (!pushToken) return;
+
+    await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: pushToken,
+        title: 'Rain watered your plant! 🌧️',
+        body: `${plant?.name ?? 'Your plant'} was auto-watered thanks to today's rainfall.`,
+      }),
+    });
+  } catch {
+    // Non-fatal — see comment above.
+  }
+}
+
 serve(async (req: Request) => {
   const expectedKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const providedKey = req.headers.get('apikey');
@@ -87,7 +119,10 @@ serve(async (req: Request) => {
             p_task_id: c.task_id,
             p_rain_mm: Math.round(totalRain * 10) / 10,
           });
-          if (!completeErr) completed++;
+          if (!completeErr) {
+            completed++;
+            await sendRainWateredPush(supabase, c.user_id, c.plant_id);
+          }
         }
       }
     }

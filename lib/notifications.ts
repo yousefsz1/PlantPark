@@ -1,5 +1,7 @@
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
+import { supabase } from './supabase';
 
 const WATERING_CONTENT = {
   title: 'Time to Water!',
@@ -15,6 +17,32 @@ export async function requestNotificationPermission(): Promise<boolean> {
     return status === 'granted';
   } catch {
     return false;
+  }
+}
+
+// Registers this device for remote push (separate from the local, on-device
+// scheduling above) and saves the Expo push token to the signed-in user's
+// profile — currently only consumed by the planned rain-watering alerts.
+// Call once per login/app-start; safe to call repeatedly since it's just an
+// upsert of the current token.
+export async function registerForPushNotifications(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  try {
+    const granted = await requestNotificationPermission();
+    if (!granted) return;
+
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+    if (!projectId) return;
+
+    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    await supabase.from('profiles').update({ push_token: token }).eq('id', user.id);
+  } catch {
+    // Non-fatal — denied permission, no physical device, or a network hiccup
+    // all just mean no token gets saved; push sends will skip this user.
   }
 }
 

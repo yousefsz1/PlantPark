@@ -376,6 +376,8 @@ export type Database = {
           latitude: number | null;
           longitude: number | null;
           location_updated_at: string | null;
+          smart_watering_enabled: boolean;
+          push_token: string | null;
         };
         Insert: {
           id: string;
@@ -387,6 +389,8 @@ export type Database = {
           latitude?: number | null;
           longitude?: number | null;
           location_updated_at?: string | null;
+          smart_watering_enabled?: boolean;
+          push_token?: string | null;
         };
         Update: {
           id?: string;
@@ -398,6 +402,8 @@ export type Database = {
           latitude?: number | null;
           longitude?: number | null;
           location_updated_at?: string | null;
+          smart_watering_enabled?: boolean;
+          push_token?: string | null;
         };
         Relationships: [];
       };

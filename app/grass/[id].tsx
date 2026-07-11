@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase';
 import { getWateringPlan, getFertilizingPlan, getMowingPlan, getGrassInsight, type SunExposure, type LawnCondition } from '../../lib/grassCare';
 import { WATER_COLOR } from '../../lib/careLevels';
 import { getScanStatus } from '../../lib/scanLimits';
+import { scheduleTaskNotification } from '../../lib/notifications';
 import type { Plant, PlantPhoto, CareTask } from '../../types/database';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -155,8 +156,14 @@ export default function GrassDetailScreen() {
     if (!pendingWateringTask) return;
     setWateringAnyway(true);
     try {
-      const { error } = await supabase.rpc('complete_care_task', { task_id: pendingWateringTask.id });
+      const { data, error } = await supabase.rpc('complete_care_task', { task_id: pendingWateringTask.id });
       if (error) throw error;
+
+      const result = data as { next_due_date: string; new_xp: number; xp_reward: number } | null;
+      if (result?.next_due_date) {
+        scheduleTaskNotification(plant.name, 'watering', result.next_due_date, plant.id).catch(() => {});
+      }
+
       await fetchData();
     } catch (err) {
       Alert.alert('Error', err instanceof Error ? err.message : 'Failed to mark as watered');

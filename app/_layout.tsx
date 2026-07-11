@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import type { Session } from '@supabase/supabase-js';
 import * as Notifications from 'expo-notifications';
 import { supabase } from '../lib/supabase';
+import { registerForPushNotifications } from '../lib/notifications';
 import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
 
 Notifications.setNotificationHandler({
@@ -112,6 +113,17 @@ export default function RootLayout() {
       router.replace('/(tabs)');
     }
   }, [session, initialized, segments]);
+
+  // Register (or refresh) the device's push token whenever a signed-in user
+  // becomes present — covers both app-start-with-existing-session and a
+  // fresh login. Keyed on user id, not the session object, so a token
+  // refresh (which produces a new session object for the same user) doesn't
+  // re-trigger this.
+  useEffect(() => {
+    if (session?.user?.id) {
+      registerForPushNotifications();
+    }
+  }, [session?.user?.id]);
 
   // Splash while determining session — prevents flashing the wrong screen
   return (

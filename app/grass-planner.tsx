@@ -15,6 +15,7 @@ import Slider from '@react-native-community/slider';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../lib/supabase';
 import { getWateringPlan, getFertilizingPlan, getMowingPlan, type SunExposure, type LawnCondition } from '../lib/grassCare';
+import { requestNotificationPermission, scheduleTaskNotification, cancelPlantNotifications } from '../lib/notifications';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../constants/theme';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -108,14 +109,21 @@ export default function GrassPlannerScreen() {
       if (error || !plant) throw new Error(error?.message ?? 'Failed to save lawn');
 
       const wateringIntervalDays = getWateringPlan(sunExposure, lawnCondition, areaM2).intervalDays;
+      const wateringDueDate = addDaysToToday(wateringIntervalDays);
       await supabase.from('care_tasks').insert({
         plant_id: plant.id,
         user_id: user.id,
         task_type: 'watering',
-        due_date: addDaysToToday(wateringIntervalDays),
+        due_date: wateringDueDate,
         xp_reward: 10,
         interval_days: wateringIntervalDays,
       });
+
+      const hasPermission = await requestNotificationPermission();
+      if (hasPermission) {
+        await cancelPlantNotifications(plant.id);
+        scheduleTaskNotification('My Lawn', 'watering', wateringDueDate, plant.id).catch(() => {});
+      }
 
       router.replace(`/grass/${plant.id}`);
     } catch (err) {

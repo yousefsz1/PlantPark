@@ -198,7 +198,20 @@ export default function ScanScreen() {
       };
 
       if (d.is_grass) {
-        setPhase('grass');
+        const grassStatus = await getScanStatus();
+        if (grassStatus?.tier === 'free') {
+          Alert.alert(
+            'Upgrade Required',
+            'Lawn & Grass Care Planning is a Basic/Pro feature — upgrade to unlock AI-powered lawn setup and care plans.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'View Plans', onPress: () => router.push('/membership') },
+            ],
+          );
+          setPhase('camera');
+        } else {
+          setPhase('grass');
+        }
       } else {
         setResult({
           name: d.name,

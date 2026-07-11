@@ -9,8 +9,6 @@ import {
   RefreshControl,
   Image,
   Alert,
-  Animated,
-  PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,8 +21,6 @@ import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../co
 import { useTheme } from '../../contexts/ThemeContext';
 import PlantCard from '../../components/PlantCard';
 import CreateSpaceModal from '../../components/CreateSpaceModal';
-
-const DELETE_ACTION_WIDTH = 80;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -50,13 +46,6 @@ function greetingIcon(): 'sunny-outline' | 'partly-sunny-outline' | 'moon-outlin
   if (h < 12) return 'sunny-outline';
   if (h < 17) return 'partly-sunny-outline';
   return 'moon-outline';
-}
-
-function extractStoragePath(publicUrl: string): string | null {
-  const marker = '/plant-images/';
-  const idx = publicUrl.indexOf(marker);
-  if (idx === -1) return null;
-  return publicUrl.slice(idx + marker.length);
 }
 
 const TASK_ICON: Record<string, 'water'> = {
@@ -98,92 +87,26 @@ function LevelBar({ totalXP }: { totalXP: number }) {
   );
 }
 
-function SwipeablePlantCard({
+function PlantListCard({
   plant,
   pendingTasks,
-  deleting,
   onPress,
-  onDelete,
 }: {
   plant: Plant;
   pendingTasks: CareTaskWithPlant[];
-  deleting: boolean;
   onPress: () => void;
-  onDelete: () => void;
 }) {
   const { Colors, FontSize } = useTheme();
   const styles = getStyles(Colors, FontSize);
-  const trans = useRef(new Animated.Value(0)).current;
-  const openRef = useRef(false);
-
-  const springTo = (val: number) =>
-    Animated.spring(trans, { toValue: val, useNativeDriver: true, bounciness: 0, speed: 20 }).start();
-
-  const close = useCallback(() => {
-    openRef.current = false;
-    springTo(0);
-  }, []);
-
-  const pan = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) =>
-        Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
-      onPanResponderMove: (_, g) => {
-        const base = openRef.current ? -DELETE_ACTION_WIDTH : 0;
-        trans.setValue(Math.max(-DELETE_ACTION_WIDTH, Math.min(0, base + g.dx)));
-      },
-      onPanResponderRelease: (_, g) => {
-        const base = openRef.current ? -DELETE_ACTION_WIDTH : 0;
-        const final = Math.max(-DELETE_ACTION_WIDTH, Math.min(0, base + g.dx));
-        if (final < -(DELETE_ACTION_WIDTH / 2)) {
-          openRef.current = true;
-          springTo(-DELETE_ACTION_WIDTH);
-        } else {
-          openRef.current = false;
-          springTo(0);
-        }
-      },
-    })
-  ).current;
 
   const today = todayISO();
   const overdueCount = pendingTasks.filter(t => t.plant_id === plant.id && t.due_date < today).length;
   const displayHealth = Math.max(0, plant.health_percent - overdueCount * 10);
 
   return (
-    <View style={styles.swipeRow}>
-      {/* Delete action revealed on swipe-left */}
-      <TouchableOpacity
-        style={[styles.deleteAction, deleting && { opacity: 0.6 }]}
-        onPress={() => { close(); onDelete(); }}
-        activeOpacity={0.85}
-        disabled={deleting}
-      >
-        {deleting ? (
-          <ActivityIndicator size="small" color="#FFFFFF" />
-        ) : (
-          <>
-            <Ionicons name="trash-outline" size={20} color="#FFFFFF" />
-            <Text style={styles.deleteActionText}>Delete</Text>
-          </>
-        )}
-      </TouchableOpacity>
-
-      {/* Card — slides left on swipe */}
-      <Animated.View style={{ transform: [{ translateX: trans }] }} {...pan.panHandlers}>
-        <TouchableOpacity
-          onPress={() => {
-            if (openRef.current) { close(); return; }
-            onPress();
-          }}
-          onLongPress={onDelete}
-          delayLongPress={500}
-          activeOpacity={0.82}
-        >
-          <PlantCard plant={plant} displayHealth={displayHealth} />
-        </TouchableOpacity>
-      </Animated.View>
-    </View>
+    <TouchableOpacity style={styles.plantCardWrap} onPress={onPress} activeOpacity={0.82}>
+      <PlantCard plant={plant} displayHealth={displayHealth} />
+    </TouchableOpacity>
   );
 }
 
@@ -300,7 +223,6 @@ export default function GardenScreen() {
   const [refreshing, setRefreshing]     = useState(false);
   const [error, setError]               = useState<string | null>(null);
   const [completingTask, setCompletingTask] = useState<string | null>(null);
-  const [deletingPlant, setDeletingPlant]   = useState<string | null>(null);
   const [showCreateSpace, setShowCreateSpace] = useState(false);
   const hasLoaded = useRef(false);
 
@@ -419,60 +341,6 @@ export default function GardenScreen() {
     }
   }, [fetchData]);
 
-  const handleDeletePlant = useCallback((plant: Plant) => {
-    Alert.alert(
-      `Delete ${plant.name}?`,
-      "This can't be undone. All care tasks and photos will be removed.",
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            setDeletingPlant(plant.id);
-            try {
-              // Fetch progress photo URLs before cascade-deleting them from DB
-              const { data: photos } = await supabase
-                .from('plant_photos')
-                .select('photo_url')
-                .eq('plant_id', plant.id);
-
-              // Cancel any scheduled notifications for this plant
-              cancelPlantNotifications(plant.id).catch(() => {});
-
-              // Delete from DB (cascade removes care_tasks + plant_photos rows)
-              const { error: delErr } = await supabase
-                .from('plants')
-                .delete()
-                .eq('id', plant.id);
-              if (delErr) throw delErr;
-
-              // Clean up Storage objects (best-effort, non-fatal)
-              const paths: string[] = [];
-              if (plant.photo_url) {
-                const p = extractStoragePath(plant.photo_url);
-                if (p) paths.push(p);
-              }
-              for (const ph of photos ?? []) {
-                const p = extractStoragePath(ph.photo_url);
-                if (p) paths.push(p);
-              }
-              if (paths.length > 0) {
-                supabase.storage.from('plant-images').remove(paths).catch(() => {});
-              }
-
-              await fetchData();
-            } catch (err) {
-              Alert.alert('Error', err instanceof Error ? err.message : 'Failed to delete plant');
-            } finally {
-              setDeletingPlant(null);
-            }
-          },
-        },
-      ],
-    );
-  }, [fetchData]);
-
   const openAddPlant = useCallback(() => router.push('/add-plant'), [router]);
 
   const visibleMissions = pendingTasks.slice(0, 6);
@@ -569,15 +437,12 @@ export default function GardenScreen() {
 
             {/* Plants */}
             <Text style={[styles.sectionTitle, { marginTop: Spacing.lg }]}>Your Plants</Text>
-            <Text style={styles.swipeHint}>Swipe left or long-press to delete</Text>
             {plants.map(p => (
-              <SwipeablePlantCard
+              <PlantListCard
                 key={p.id}
                 plant={p}
                 pendingTasks={pendingTasks}
-                deleting={deletingPlant === p.id}
                 onPress={() => router.push(p.is_grass ? `/grass/${p.id}` : `/plant/${p.id}`)}
-                onDelete={() => handleDeletePlant(p)}
               />
             ))}
           </>
@@ -656,13 +521,6 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     letterSpacing: 0.8,
     marginBottom: Spacing.sm,
   },
-  swipeHint: {
-    fontSize: FontSize.xs,
-    color: Colors.textMuted,
-    marginBottom: Spacing.sm,
-    marginTop: -Spacing.xs,
-  },
-
   // Missions
   noMissions: {
     backgroundColor: Colors.surface,
@@ -715,26 +573,10 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     marginBottom: Spacing.sm,
   },
 
-  // Swipeable plant cards
-  swipeRow: {
+  // Plant cards
+  plantCardWrap: {
     marginBottom: Spacing.sm,
-    position: 'relative',
-    overflow: 'hidden',
-    borderRadius: Radius.lg,
   },
-  deleteAction: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
-    width: DELETE_ACTION_WIDTH,
-    backgroundColor: Colors.danger,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 4,
-    borderRadius: Radius.lg,
-  },
-  deleteActionText: { fontSize: FontSize.xs, fontWeight: '700', color: '#FFFFFF' },
 
   // Spaces
   spacesRow: { flexDirection: 'row', gap: Spacing.sm, paddingBottom: Spacing.sm },

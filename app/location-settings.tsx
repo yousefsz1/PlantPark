@@ -1,10 +1,11 @@
-import { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, Alert } from 'react-native';
+import { useState, useCallback, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, Alert, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { useDeviceLocation, searchCity, setManualLocation, type GeocodeResult } from '../lib/location';
+import { getScanStatus } from '../lib/scanLimits';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../constants/theme';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -27,16 +28,58 @@ export default function LocationSettingsScreen() {
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<GeocodeResult[]>([]);
   const [selecting, setSelecting] = useState<string | null>(null);
+  const [smartWateringEnabled, setSmartWateringEnabled] = useState(true);
+  const [checkingAccess, setCheckingAccess] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const status = await getScanStatus();
+      if (cancelled) return;
+      if (status?.tier === 'free') {
+        Alert.alert(
+          'Upgrade Required',
+          'Smart Watering is a Basic/Pro feature — upgrade to unlock automatic rain detection for your outdoor plants and lawn.',
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => router.back() },
+            { text: 'View Plans', onPress: () => { router.back(); router.push('/membership'); } },
+          ],
+          { onDismiss: () => router.back() },
+        );
+        return;
+      }
+      setCheckingAccess(false);
+    })();
+    return () => { cancelled = true; };
+  }, [router]);
 
   useFocusEffect(
     useCallback(() => {
-      supabase.from('profiles').select('latitude, longitude, location_updated_at').maybeSingle().then(({ data }) => {
-        if (data?.latitude != null && data?.longitude != null) {
-          setCurrent({ latitude: data.latitude, longitude: data.longitude, updatedAt: data.location_updated_at });
-        }
-      });
+      supabase
+        .from('profiles')
+        .select('latitude, longitude, location_updated_at, smart_watering_enabled')
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data?.latitude != null && data?.longitude != null) {
+            setCurrent({ latitude: data.latitude, longitude: data.longitude, updatedAt: data.location_updated_at });
+          }
+          if (data?.smart_watering_enabled != null) {
+            setSmartWateringEnabled(data.smart_watering_enabled);
+          }
+        });
     }, []),
   );
+
+  const handleToggleSmartWatering = useCallback(async (value: boolean) => {
+    setSmartWateringEnabled(value);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { error } = await supabase.from('profiles').update({ smart_watering_enabled: value }).eq('id', user.id);
+    if (error) {
+      setSmartWateringEnabled(!value);
+      Alert.alert('Error', 'Failed to update Auto Rain Detection. Please try again.');
+    }
+  }, []);
 
   const handleUseDevice = useCallback(async () => {
     setUsingDevice(true);
@@ -78,6 +121,23 @@ export default function LocationSettingsScreen() {
       setSelecting(null);
     }
   }, []);
+
+  if (checkingAccess) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Location</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="small" color={Colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -157,6 +217,21 @@ export default function LocationSettingsScreen() {
             {selecting === r.name ? <ActivityIndicator size="small" color={Colors.primary} /> : null}
           </TouchableOpacity>
         ))}
+
+        <View style={styles.toggleCard}>
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>Auto Rain Detection</Text>
+            <Switch
+              value={smartWateringEnabled}
+              onValueChange={handleToggleSmartWatering}
+              trackColor={{ false: Colors.surfaceElevated, true: Colors.primary }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+          <Text style={styles.toggleDescription}>
+            Automatically mark outdoor watering done when enough rain falls at your location. Turn off to always water manually.
+          </Text>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -184,6 +259,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     headerSpacer: { width: 38 },
 
     content: { padding: Spacing.md, paddingBottom: Spacing.xxl },
+    loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     explainer: { fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 20, marginBottom: Spacing.md },
 
     currentCard: {
@@ -247,5 +323,18 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
       borderColor: Colors.border,
     },
     resultText: { flex: 1, fontSize: FontSize.sm, color: Colors.textPrimary },
+
+    toggleCard: {
+      backgroundColor: Colors.surface,
+      borderRadius: Radius.md,
+      padding: Spacing.md,
+      marginTop: Spacing.lg,
+      borderWidth: 1,
+      borderColor: Colors.border,
+      gap: 6,
+    },
+    toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    toggleLabel: { fontSize: FontSize.md, fontWeight: '600', color: Colors.textPrimary },
+    toggleDescription: { fontSize: FontSize.xs, color: Colors.textMuted, lineHeight: 18 },
   });
 }

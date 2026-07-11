@@ -9,6 +9,7 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -152,7 +153,7 @@ export default function AuthScreen() {
           {/* ── Branding ── */}
           <View style={styles.brand}>
             <View style={styles.logoCircle}>
-              <Ionicons name="leaf" size={44} color={Colors.primary} />
+              <Image source={require('../assets/icon-square.png')} style={styles.logoImage} />
             </View>
             <Text style={styles.appName}>Plant Park</Text>
             <Text style={styles.tagline}>Grow your green world</Text>
@@ -307,6 +308,12 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     marginBottom: Spacing.md,
     borderWidth: 2,
     borderColor: Colors.primary,
+    overflow: 'hidden',
+  },
+  logoImage: {
+    width: 84,
+    height: 84,
+    borderRadius: Radius.full,
   },
   appName: {
     fontSize: 36,

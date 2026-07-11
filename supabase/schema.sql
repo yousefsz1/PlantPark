@@ -825,3 +825,24 @@ $$;
 GRANT EXECUTE ON FUNCTION public.complete_care_task_via_rain(UUID, NUMERIC) TO service_role;
 
 NOTIFY pgrst, 'reload schema';
+
+-- ── Smart Watering: per-user opt-out ──────────────────────────────────────
+-- Added directly against the live DB (not captured here at the time);
+-- recorded retroactively to keep this accumulator accurate. When false, the
+-- Location settings screen's "Auto Rain Detection" toggle is off and the
+-- check-rainfall edge function should skip this user's plants (candidate
+-- query not yet updated to check this — see get_rain_check_candidates).
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS smart_watering_enabled BOOLEAN NOT NULL DEFAULT true;
+
+NOTIFY pgrst, 'reload schema';
+
+-- ── Push notifications: device token storage ──────────────────────────────
+-- Added directly against the live DB (not captured here at the time);
+-- recorded retroactively to keep this accumulator accurate. Holds the
+-- Expo push token for the user's current device, to be populated once
+-- push-notification registration is built (e.g. for rain-watering alerts).
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS push_token TEXT;
+
+NOTIFY pgrst, 'reload schema';

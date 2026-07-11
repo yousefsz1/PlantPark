@@ -150,7 +150,20 @@ export default function AddPlantScreen() {
       if (data?.error) throw new Error(data.error);
       const d = data as DetectedPlant;
       if (d.is_grass) {
-        setPhase('grass');
+        const grassStatus = await getScanStatus();
+        if (grassStatus?.tier === 'free') {
+          Alert.alert(
+            'Upgrade Required',
+            'Lawn & Grass Care Planning is a Basic/Pro feature — upgrade to unlock AI-powered lawn setup and care plans.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'View Plans', onPress: () => router.push('/membership') },
+            ],
+          );
+          setPhase('capture');
+        } else {
+          setPhase('grass');
+        }
       } else {
         setDetected(d);
         setPhase('review');
