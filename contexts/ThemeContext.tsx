@@ -41,7 +41,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // Device preference — 'light' | 'dark' | null/undefined depending on platform/state.
   const systemScheme = useColorScheme();
 
-  const [themeMode, setThemeModeState] = useState<ThemeMode>('system');
+  const [themeMode, setThemeModeState] = useState<ThemeMode>('light');
   const [fontScaleMode, setFontScaleModeState] = useState<FontScaleMode>('default');
 
   // Load persisted preferences once on mount. Defaults ('system' / 'default')

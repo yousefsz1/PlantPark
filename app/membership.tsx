@@ -3,9 +3,11 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
+import Purchases, { type PurchasesPackage, type CustomerInfo } from 'react-native-purchases';
 import { getScanStatus, TIER_LIMITS, type MembershipTier } from '../lib/scanLimits';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../constants/theme';
 import { useTheme } from '../contexts/ThemeContext';
+import { supabase } from '../lib/supabase';
 
 type TierInfo = {
   id: MembershipTier;
@@ -53,8 +55,22 @@ const TIERS: TierInfo[] = [
   },
 ];
 
-function handleUpgrade() {
-  Alert.alert('Coming Soon', 'Payments coming soon — check back shortly to upgrade your plan!');
+function packageKey(tier: 'basic' | 'pro', period: 'monthly' | 'yearly') {
+  return `${tier}_${period}`;
+}
+
+async function syncMembershipTier(customerInfo: CustomerInfo): Promise<MembershipTier> {
+  const active = customerInfo.entitlements.active;
+  let tier: MembershipTier = 'free';
+  if (active['pro_access']) tier = 'pro';
+  else if (active['basic_access']) tier = 'basic';
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user) {
+    await supabase.from('profiles').update({ membership_tier: tier }).eq('id', user.id);
+  }
+
+  return tier;
 }
 
 export default function MembershipScreen() {
@@ -63,21 +79,84 @@ export default function MembershipScreen() {
   const styles = getStyles(Colors, FontSize);
   const [currentTier, setCurrentTier] = useState<MembershipTier>('free');
   const [loading, setLoading] = useState(true);
+  const [packages, setPackages] = useState<Record<string, PurchasesPackage>>({});
+  const [purchasingKey, setPurchasingKey] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
       setLoading(true);
-      getScanStatus().then((status) => {
+
+      Promise.all([
+        getScanStatus(),
+        Purchases.getOfferings().catch((err) => {
+          console.warn('[RevenueCat] getOfferings failed:', err);
+          return null;
+        }),
+      ]).then(([status, offerings]) => {
         if (cancelled) return;
         setCurrentTier(status?.tier ?? 'free');
+
+        if (offerings?.current) {
+          const map: Record<string, PurchasesPackage> = {};
+          offerings.current.availablePackages.forEach((pkg) => {
+            map[pkg.identifier] = pkg;
+          });
+          setPackages(map);
+        }
+
         setLoading(false);
       });
+
       return () => {
         cancelled = true;
       };
     }, []),
   );
+
+  async function purchaseTier(tier: 'basic' | 'pro', period: 'monthly' | 'yearly') {
+    const key = packageKey(tier, period);
+    const pkg = packages[key];
+
+    if (!pkg) {
+      Alert.alert('Unavailable', 'This plan is not available right now. Please try again shortly.');
+      return;
+    }
+
+    setPurchasingKey(key);
+    try {
+      const { customerInfo } = await Purchases.purchasePackage(pkg);
+      const newTier = await syncMembershipTier(customerInfo);
+      setCurrentTier(newTier);
+      Alert.alert('Success', `You're now on the ${tier === 'pro' ? 'Pro' : 'Basic'} plan!`);
+    } catch (err: any) {
+      if (!err?.userCancelled) {
+        Alert.alert('Purchase failed', err?.message ?? 'Something went wrong. Please try again.');
+      }
+    } finally {
+      setPurchasingKey(null);
+    }
+  }
+
+  function handleUpgrade(tier: MembershipTier) {
+    if (tier === 'free') {
+      Alert.alert(
+        'Manage Subscription',
+        'To downgrade, cancel your subscription from Settings > [Your Name] > Subscriptions on your device.',
+      );
+      return;
+    }
+
+    Alert.alert(
+      `Upgrade to ${tier === 'pro' ? 'Pro' : 'Basic'}`,
+      'Choose a billing period',
+      [
+        { text: 'Monthly', onPress: () => purchaseTier(tier, 'monthly') },
+        { text: 'Yearly', onPress: () => purchaseTier(tier, 'yearly') },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -99,6 +178,11 @@ export default function MembershipScreen() {
 
           {TIERS.map((tier) => {
             const isCurrent = tier.id === currentTier;
+            const isPurchasing =
+              tier.id !== 'free' &&
+              (purchasingKey === packageKey(tier.id as 'basic' | 'pro', 'monthly') ||
+                purchasingKey === packageKey(tier.id as 'basic' | 'pro', 'yearly'));
+
             return (
               <View key={tier.id} style={[styles.card, isCurrent && styles.cardCurrent]}>
                 <View style={styles.cardHeader}>
@@ -126,8 +210,17 @@ export default function MembershipScreen() {
                 </View>
 
                 {!isCurrent && (
-                  <TouchableOpacity style={styles.upgradeBtn} onPress={handleUpgrade} activeOpacity={0.85}>
-                    <Text style={styles.upgradeBtnText}>Upgrade</Text>
+                  <TouchableOpacity
+                    style={[styles.upgradeBtn, isPurchasing && { opacity: 0.6 }]}
+                    onPress={() => handleUpgrade(tier.id)}
+                    activeOpacity={0.85}
+                    disabled={isPurchasing}
+                  >
+                    {isPurchasing ? (
+                      <ActivityIndicator size="small" color={Colors.textPrimary} />
+                    ) : (
+                      <Text style={styles.upgradeBtnText}>Upgrade</Text>
+                    )}
                   </TouchableOpacity>
                 )}
               </View>

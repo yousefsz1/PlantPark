@@ -16,7 +16,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { getLevel, xpToNextLevel } from '../../lib/levels';
 import { scheduleTaskNotification, cancelPlantNotifications } from '../../lib/notifications';
-import type { Plant, CareTaskWithPlant, Space } from '../../types/database';
+import type { Plant, CareTaskWithPlantPhoto, Space } from '../../types/database';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import PlantCard from '../../components/PlantCard';
@@ -93,7 +93,7 @@ function PlantListCard({
   onPress,
 }: {
   plant: Plant;
-  pendingTasks: CareTaskWithPlant[];
+  pendingTasks: CareTaskWithPlantPhoto[];
   onPress: () => void;
 }) {
   const { Colors, FontSize } = useTheme();
@@ -114,10 +114,12 @@ function MissionCard({
   task,
   isCompleting,
   onComplete,
+  onPress,
 }: {
-  task: CareTaskWithPlant;
+  task: CareTaskWithPlantPhoto;
   isCompleting: boolean;
   onComplete: () => void;
+  onPress: () => void;
 }) {
   const { Colors, FontSize } = useTheme();
   const styles = getStyles(Colors, FontSize);
@@ -125,10 +127,18 @@ function MissionCard({
   const isOverdue = task.due_date < today;
 
   return (
-    <View style={[styles.missionCard, isOverdue && styles.missionCardOverdue]}>
-      <View style={[styles.missionIconWrap, { backgroundColor: `${TASK_COLOR[task.task_type] ?? Colors.primary}18` }]}>
-        <Ionicons name={TASK_ICON[task.task_type] ?? 'leaf'} size={20} color={TASK_COLOR[task.task_type] ?? Colors.primary} />
-      </View>
+    <TouchableOpacity
+      style={[styles.missionCard, isOverdue && styles.missionCardOverdue]}
+      onPress={onPress}
+      activeOpacity={0.75}
+    >
+      {task.plants?.photo_url ? (
+        <Image source={{ uri: task.plants.photo_url }} style={styles.missionThumb} />
+      ) : (
+        <View style={[styles.missionIconWrap, { backgroundColor: `${TASK_COLOR[task.task_type] ?? Colors.primary}18` }]}>
+          <Ionicons name={TASK_ICON[task.task_type] ?? 'leaf'} size={20} color={TASK_COLOR[task.task_type] ?? Colors.primary} />
+        </View>
+      )}
       <View style={styles.missionInfo}>
         <Text style={styles.missionAction}>
           {TASK_LABEL[task.task_type]} {task.plants?.name ?? 'plant'}
@@ -149,7 +159,7 @@ function MissionCard({
           <Text style={styles.doneBtnText}>Done</Text>
         )}
       </TouchableOpacity>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -216,7 +226,7 @@ export default function GardenScreen() {
   const router = useRouter();
   const [plants, setPlants]             = useState<Plant[]>([]);
   const [spaces, setSpaces]             = useState<Space[]>([]);
-  const [pendingTasks, setPendingTasks] = useState<CareTaskWithPlant[]>([]);
+  const [pendingTasks, setPendingTasks] = useState<CareTaskWithPlantPhoto[]>([]);
   const [totalXP, setTotalXP]           = useState(0);
   const [displayName, setDisplayName]   = useState('');
   const [loading, setLoading]           = useState(true);
@@ -235,7 +245,7 @@ export default function GardenScreen() {
       supabase.from('spaces').select('*').order('created_at', { ascending: true }),
       supabase
         .from('care_tasks')
-        .select('*, plants(id, name)')
+        .select('*, plants(id, name, photo_url)')
         .eq('task_type', 'watering')
         .lte('due_date', today)
         .is('completed_at', null)
@@ -250,7 +260,7 @@ export default function GardenScreen() {
       setPlants(plantsRes.data ?? []);
     }
     setSpaces(spacesRes.data ?? []);
-    setPendingTasks((tasksRes.data ?? []) as CareTaskWithPlant[]);
+    setPendingTasks((tasksRes.data ?? []) as CareTaskWithPlantPhoto[]);
     setTotalXP(profileRes.data?.total_xp ?? 0);
 
     const authUser = userRes.data?.user;
@@ -276,7 +286,7 @@ export default function GardenScreen() {
     setRefreshing(false);
   }, [fetchData]);
 
-  const handleCompleteTask = useCallback(async (task: CareTaskWithPlant) => {
+  const handleCompleteTask = useCallback(async (task: CareTaskWithPlantPhoto) => {
     setCompletingTask(task.id);
     try {
       const { data, error: rpcErr } = await supabase.rpc('complete_care_task', { task_id: task.id });
@@ -409,6 +419,7 @@ export default function GardenScreen() {
                     task={task}
                     isCompleting={completingTask === task.id}
                     onComplete={() => handleCompleteTask(task)}
+                    onPress={() => router.push(`/plant/${task.plant_id}`)}
                   />
                 ))}
                 {extraMissions > 0 && (
@@ -545,6 +556,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   },
   missionCardOverdue: { borderColor: Colors.danger, backgroundColor: 'rgba(231,76,60,0.04)' },
   missionIconWrap: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+  missionThumb: { width: 36, height: 36, borderRadius: 18 },
   missionInfo: { flex: 1, gap: 2 },
   missionAction: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.textPrimary },
   missionOverdue: { fontSize: FontSize.xs, color: Colors.danger, fontWeight: '600' },

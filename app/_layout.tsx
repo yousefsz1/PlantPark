@@ -1,13 +1,16 @@
 import 'react-native-url-polyfill/auto';
 import { useEffect, useState } from 'react';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Platform } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import type { Session } from '@supabase/supabase-js';
 import * as Notifications from 'expo-notifications';
+import Purchases from 'react-native-purchases';
 import { supabase } from '../lib/supabase';
 import { registerForPushNotifications } from '../lib/notifications';
 import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
+
+const REVENUECAT_IOS_API_KEY = 'appl_YsArSDjutFNSjVAgQhpuzZEkcpO';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -35,6 +38,13 @@ export default function RootLayout() {
   const [initialized, setInitialized] = useState(false);
   const router = useRouter();
   const segments = useSegments();
+
+  // Configure RevenueCat once on app start.
+  useEffect(() => {
+    if (Platform.OS === 'ios') {
+      Purchases.configure({ apiKey: REVENUECAT_IOS_API_KEY });
+    }
+  }, []);
 
   // Load session once on mount, then subscribe to changes
   useEffect(() => {
@@ -118,10 +128,13 @@ export default function RootLayout() {
   // becomes present — covers both app-start-with-existing-session and a
   // fresh login. Keyed on user id, not the session object, so a token
   // refresh (which produces a new session object for the same user) doesn't
-  // re-trigger this.
+  // re-trigger this. Also links the RevenueCat customer to this user's ID.
   useEffect(() => {
     if (session?.user?.id) {
       registerForPushNotifications();
+      Purchases.logIn(session.user.id).catch((err) => {
+        console.warn('[RevenueCat] logIn failed:', err);
+      });
     }
   }, [session?.user?.id]);
 

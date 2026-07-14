@@ -19,6 +19,7 @@ import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../co
 import { useTheme } from '../../contexts/ThemeContext';
 import ToxicitySeverityBar from '../../components/ToxicitySeverityBar';
 import LevelBar from '../../components/LevelBar';
+import PhotoViewerModal, { type GalleryPhoto } from '../../components/PhotoViewerModal';
 
 const SUNLIGHT_LABELS: Record<string, string> = {
   low: 'Low Light',
@@ -59,6 +60,8 @@ export default function FavouriteDetailScreen() {
   const [favourite, setFavourite] = useState<Favourite | null>(null);
   const [loading, setLoading] = useState(true);
   const [removing, setRemoving] = useState(false);
+  const [photoViewerVisible, setPhotoViewerVisible] = useState(false);
+  const [photoViewerIndex, setPhotoViewerIndex] = useState(0);
 
   const fetchFavourite = useCallback(async () => {
     if (!id) return;
@@ -117,6 +120,9 @@ export default function FavouriteDetailScreen() {
   }
 
   const hasProTips = (favourite.health_tips_pro?.length ?? 0) > 0;
+  const galleryPhotos: GalleryPhoto[] = favourite.photo_url
+    ? [{ id: 'hero', photo_url: favourite.photo_url, created_at: favourite.created_at }]
+    : [];
   const wateringLevel = getWateringLevel(null, favourite.watering_frequency);
   const sunlightLevel = getSunlightLevel(favourite.sunlight);
   const infoItems = [
@@ -140,7 +146,15 @@ export default function FavouriteDetailScreen() {
         {/* ── Hero ── */}
         <View style={styles.hero}>
           {favourite.photo_url ? (
-            <Image source={{ uri: favourite.photo_url }} style={styles.heroImage} resizeMode="cover" />
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => {
+                setPhotoViewerIndex(0);
+                setPhotoViewerVisible(true);
+              }}
+            >
+              <Image source={{ uri: favourite.photo_url }} style={styles.heroImage} resizeMode="cover" />
+            </TouchableOpacity>
           ) : (
             <View style={[styles.heroImage, styles.heroPlaceholder]}>
               <Ionicons name="heart" size={80} color={Colors.danger} style={{ opacity: 0.45 }} />
@@ -258,6 +272,13 @@ export default function FavouriteDetailScreen() {
           </View>
         ) : null}
       </ScrollView>
+
+      <PhotoViewerModal
+        visible={photoViewerVisible}
+        photos={galleryPhotos}
+        initialIndex={photoViewerIndex}
+        onClose={() => setPhotoViewerVisible(false)}
+      />
     </SafeAreaView>
   );
 }

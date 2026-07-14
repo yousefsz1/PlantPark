@@ -158,6 +158,27 @@ export type Database = {
           },
         ];
       };
+      favourite_folders: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          name: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          name?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       favourites: {
         Row: {
           id: string;
@@ -188,6 +209,7 @@ export type Database = {
           health_diagnosis_issues: string | null;
           health_recommendation: string | null;
           health_checked_at: string | null;
+          folder_id: string | null;
         };
         Insert: {
           id?: string;
@@ -218,6 +240,7 @@ export type Database = {
           health_diagnosis_issues?: string | null;
           health_recommendation?: string | null;
           health_checked_at?: string | null;
+          folder_id?: string | null;
         };
         Update: {
           id?: string;
@@ -248,12 +271,19 @@ export type Database = {
           health_diagnosis_issues?: string | null;
           health_recommendation?: string | null;
           health_checked_at?: string | null;
+          folder_id?: string | null;
         };
         Relationships: [
           {
             foreignKeyName: 'favourites_space_id_fkey';
             columns: ['space_id'];
             referencedRelation: 'spaces';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'favourites_folder_id_fkey';
+            columns: ['folder_id'];
+            referencedRelation: 'favourite_folders';
             referencedColumns: ['id'];
           },
         ];
@@ -456,6 +486,7 @@ export type Database = {
 export type Plant = Database['public']['Tables']['plants']['Row'];
 export type CareTask = Database['public']['Tables']['care_tasks']['Row'];
 export type Favourite = Database['public']['Tables']['favourites']['Row'];
+export type FavouriteFolder = Database['public']['Tables']['favourite_folders']['Row'];
 export type Space = Database['public']['Tables']['spaces']['Row'];
 
 export type PlantPhoto = Database['public']['Tables']['plant_photos']['Row'];
