@@ -846,3 +846,17 @@ ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS push_token TEXT;
 
 NOTIFY pgrst, 'reload schema';
+
+-- ── Favourites: missing UPDATE policy ──────────────────────────────────────
+-- favourites has always had SELECT/INSERT/DELETE policies but never an
+-- UPDATE one — nothing needed to update a favourite in place until the
+-- folder-assignment feature (favourites.folder_id) shipped. With RLS
+-- enabled and no UPDATE policy, every UPDATE silently matches zero rows
+-- (PostgREST returns success, not an error), which is why folder
+-- assignment appeared to succeed client-side but never actually persisted.
+CREATE POLICY "Users can update own favourites"
+  ON public.favourites FOR UPDATE
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+NOTIFY pgrst, 'reload schema';

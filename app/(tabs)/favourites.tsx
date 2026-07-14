@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,6 @@ import {
   Image,
   Dimensions,
   Modal,
-  TextInput,
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -88,83 +87,6 @@ function FolderChip({
         {label}
       </Text>
     </TouchableOpacity>
-  );
-}
-
-// Bottom sheet used for both creating a new folder and renaming an existing
-// one — just a name field and a save button, no presets (unlike Spaces'
-// CreateSpaceModal, folders here don't have preset names).
-function FolderNameModal({
-  visible,
-  title,
-  initialName,
-  onClose,
-  onSubmit,
-}: {
-  visible: boolean;
-  title: string;
-  initialName: string;
-  onClose: () => void;
-  onSubmit: (name: string) => Promise<void>;
-}) {
-  const { Colors, FontSize } = useTheme();
-  const styles = getStyles(Colors, FontSize);
-  const [name, setName] = useState(initialName);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (visible) setName(initialName);
-  }, [visible, initialName]);
-
-  const handleClose = () => {
-    if (saving) return;
-    onClose();
-  };
-
-  const handleSave = async () => {
-    if (!name.trim() || saving) return;
-    setSaving(true);
-    try {
-      await onSubmit(name.trim());
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <View style={styles.backdrop}>
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={handleClose} />
-        <View style={styles.sheet}>
-          <View style={styles.handle} />
-          <Text style={styles.sheetTitle}>{title}</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Folder name"
-            placeholderTextColor={Colors.textMuted}
-            value={name}
-            onChangeText={setName}
-            autoFocus
-            maxLength={40}
-            editable={!saving}
-            onSubmitEditing={handleSave}
-            returnKeyType="done"
-          />
-          <TouchableOpacity
-            style={[styles.saveBtn, (!name.trim() || saving) && styles.saveBtnDisabled]}
-            onPress={handleSave}
-            disabled={!name.trim() || saving}
-            activeOpacity={0.85}
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color={Colors.textPrimary} />
-            ) : (
-              <Text style={styles.saveBtnText}>Save</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
   );
 }
 
@@ -271,8 +193,6 @@ export default function FavouritesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [createFolderVisible, setCreateFolderVisible] = useState(false);
-  const [renamingFolder, setRenamingFolder] = useState<FavouriteFolder | null>(null);
   const [assigningFavourite, setAssigningFavourite] = useState<Favourite | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -313,8 +233,23 @@ export default function FavouritesScreen() {
       return;
     }
     setFolders(prev => [...prev, data]);
-    setCreateFolderVisible(false);
   }, []);
+
+  const handleCreateFolderPrompt = useCallback(() => {
+    Alert.prompt(
+      'New Folder',
+      'Enter a name for this folder',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Create',
+          onPress: (name?: string) => {
+            if (name && name.trim()) handleCreateFolder(name.trim());
+          },
+        },
+      ],
+    );
+  }, [handleCreateFolder]);
 
   const handleRenameFolder = useCallback(async (folder: FavouriteFolder, name: string) => {
     const { data, error: err } = await supabase
@@ -328,7 +263,6 @@ export default function FavouritesScreen() {
       return;
     }
     setFolders(prev => prev.map(f => (f.id === folder.id ? data : f)));
-    setRenamingFolder(null);
   }, []);
 
   const handleDeleteFolder = useCallback((folder: FavouriteFolder) => {
@@ -355,27 +289,55 @@ export default function FavouritesScreen() {
     );
   }, []);
 
+  const handleRenameFolderPrompt = useCallback((folder: FavouriteFolder) => {
+    Alert.prompt(
+      'Rename Folder',
+      undefined,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Save',
+          onPress: (name?: string) => {
+            if (name && name.trim()) handleRenameFolder(folder, name.trim());
+          },
+        },
+      ],
+      'plain-text',
+      folder.name,
+    );
+  }, [handleRenameFolder]);
+
   const handleLongPressFolderChip = useCallback((folder: FavouriteFolder) => {
     Alert.alert(
       folder.name,
       'What would you like to do with this list?',
       [
-        { text: 'Rename', onPress: () => setRenamingFolder(folder) },
+        { text: 'Rename', onPress: () => handleRenameFolderPrompt(folder) },
         { text: 'Delete', style: 'destructive', onPress: () => handleDeleteFolder(folder) },
         { text: 'Cancel', style: 'cancel' },
       ],
     );
-  }, [handleDeleteFolder]);
+  }, [handleDeleteFolder, handleRenameFolderPrompt]);
 
   const handleAssignFolder = useCallback(async (folderId: string | null) => {
     if (!assigningFavourite) return;
     const favourite = assigningFavourite;
-    const { error: err } = await supabase
+    // .select() is required here, not just .update() — without it, an
+    // update blocked by RLS (or matching zero rows for any other reason)
+    // still comes back as `error: null` with no way to tell it apart from
+    // a real success. Checking the returned rows is what actually catches
+    // a silent no-op failure.
+    const { data, error: err } = await supabase
       .from('favourites')
       .update({ folder_id: folderId })
-      .eq('id', favourite.id);
+      .eq('id', favourite.id)
+      .select('id');
     if (err) {
       Alert.alert('Error', err.message);
+      return;
+    }
+    if (!data || data.length === 0) {
+      Alert.alert('Error', 'Could not move this favourite. Please try again.');
       return;
     }
     setFavourites(prev => prev.map(f => (f.id === favourite.id ? { ...f, folder_id: folderId } : f)));
@@ -417,7 +379,7 @@ export default function FavouritesScreen() {
           ))}
           <TouchableOpacity
             style={styles.addChip}
-            onPress={() => setCreateFolderVisible(true)}
+            onPress={handleCreateFolderPrompt}
             activeOpacity={0.75}
           >
             <Ionicons name="add" size={18} color={Colors.primary} />
@@ -467,25 +429,6 @@ export default function FavouritesScreen() {
         />
       )}
 
-      <FolderNameModal
-        visible={createFolderVisible}
-        title="New Folder"
-        initialName=""
-        onClose={() => setCreateFolderVisible(false)}
-        onSubmit={handleCreateFolder}
-      />
-
-      <FolderNameModal
-        visible={renamingFolder !== null}
-        title="Rename Folder"
-        initialName={renamingFolder?.name ?? ''}
-        onClose={() => setRenamingFolder(null)}
-        onSubmit={(name) => {
-          if (!renamingFolder) return Promise.resolve();
-          return handleRenameFolder(renamingFolder, name);
-        }}
-      />
-
       <AssignFolderModal
         visible={assigningFavourite !== null}
         favourite={assigningFavourite}
@@ -503,8 +446,13 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   header: { paddingHorizontal: Spacing.md, paddingTop: Spacing.sm, paddingBottom: Spacing.md },
   title: { fontSize: FontSize.hero, fontWeight: '700', color: Colors.textPrimary },
 
-  content: { paddingHorizontal: Spacing.md, paddingBottom: Spacing.xl },
-  contentCentered: { flexGrow: 1, justifyContent: 'center' },
+  // paddingTop lives here (not conditionally) so the grid and the empty
+  // state both start at the same offset below the chip row — previously
+  // contentCentered's justifyContent: 'center' vertically centered the
+  // empty state within the full remaining height, which visually read as
+  // an extra gap versus the top-anchored grid.
+  content: { paddingHorizontal: Spacing.md, paddingTop: Spacing.sm, paddingBottom: Spacing.xl },
+  contentCentered: { flexGrow: 1 },
   row: { gap: Spacing.sm },
 
   card: {
@@ -583,24 +531,6 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     marginBottom: Spacing.xs,
   },
   sheetTitle: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.textPrimary },
-
-  input: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.md,
-    fontSize: FontSize.md,
-    color: Colors.textPrimary,
-  },
-  saveBtn: {
-    backgroundColor: Colors.primary,
-    borderRadius: Radius.full,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  saveBtnDisabled: { opacity: 0.5 },
-  saveBtnText: { fontSize: FontSize.md, fontWeight: '700', color: Colors.textPrimary },
 
   assignList: { flexGrow: 0 },
   assignRow: {
