@@ -1,4 +1,5 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { checkScanAllowance, recordScans } from '../_shared/scanGuard.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -338,6 +339,11 @@ serve(async (req: Request) => {
     return new Response('ok', { headers: CORS });
   }
 
+  // Server-side scan-limit enforcement — the client-side check is only a
+  // courtesy UI; this is the real gate (prevents direct-API abuse).
+  const guard = await checkScanAllowance(req, 1, CORS);
+  if (!guard.ok) return guard.response;
+
   try {
     const apiKey = Deno.env.get('GEMINI_API_KEY');
     if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
@@ -386,6 +392,10 @@ serve(async (req: Request) => {
     // Strip any accidental markdown fences
     const jsonStr = raw.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim();
     const parsed = JSON.parse(jsonStr);
+
+    // Meter the scan server-side now that the (paid) Gemini call succeeded.
+    // Replaces the old client-side fire-and-forget increment.
+    await recordScans(guard.admin, guard.userId, 1);
 
     // Expose the grass/lawn detection field under the snake_case name the
     // client expects, matching the convention below.

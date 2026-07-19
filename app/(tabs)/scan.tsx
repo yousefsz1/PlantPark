@@ -8,6 +8,7 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,9 +18,10 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { useRouter, useIsFocused } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { requestNotificationPermission, scheduleTaskNotification, cancelPlantNotifications } from '../../lib/notifications';
-import { getScanStatus, incrementScanCount } from '../../lib/scanLimits';
+import { getScanStatus, awardXP } from '../../lib/scanLimits';
 import { getWateringLevel, getSunlightLevel, WATER_COLOR } from '../../lib/careLevels';
-import type { Space } from '../../types/database';
+import { parseTip } from '../../lib/tipIcons';
+import type { Space, JournalEntryType } from '../../types/database';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import ToxicitySeverityBar from '../../components/ToxicitySeverityBar';
@@ -65,14 +67,26 @@ interface ScanResult {
 
 type Phase = 'camera' | 'analyzing' | 'result' | 'grass';
 
+// Badge backgrounds are a translucent wash of the status color ("1F" ≈ 12%
+// alpha) so they adapt to both dark and light themes — the previous fixed
+// dark hexes were unreadable in light mode.
 function getStatusConfig(Colors: ColorPalette): Record<HealthStatus, { label: string; color: string; bg: string }> {
   return {
-    healthy:  { label: 'Healthy',  color: Colors.primary, bg: '#0B2A14' },
-    mild:     { label: 'Mild',     color: Colors.warning, bg: '#2E1E00' },
-    serious:  { label: 'Serious',  color: Colors.serious, bg: '#2E1200' },
-    critical: { label: 'Critical', color: Colors.danger,  bg: '#2E0808' },
+    healthy:  { label: 'Healthy',  color: Colors.primary, bg: `${Colors.primary}1F` },
+    mild:     { label: 'Mild',     color: Colors.warning, bg: `${Colors.warning}1F` },
+    serious:  { label: 'Serious',  color: Colors.serious, bg: `${Colors.serious}1F` },
+    critical: { label: 'Critical', color: Colors.danger,  bg: `${Colors.danger}1F` },
   };
 }
+
+// Shown one at a time while Gemini analyzes (~3s) — makes the wait feel
+// shorter than a static line.
+const ANALYZING_TIPS = [
+  'Identifying species and health…',
+  'Tip: scan in daylight for the most accurate results',
+  'Checking toxicity for kids and pets…',
+  'Building a care schedule for your plant…',
+];
 
 const SUNLIGHT_LABELS: Record<string, string> = {
   low: 'Low Light',
@@ -86,18 +100,19 @@ const GROWING_LOCATION_LABELS: Record<string, string> = {
   both: 'Both',
 };
 
-const ICONS = {
-  waterDrop:     require('../../assets/icons/water_drop.png'),
-  sun:           require('../../assets/icons/sun.png'),
-  seedling:      require('../../assets/icons/seedling.png'),
-  thermometer:   require('../../assets/icons/thermometer.png'),
-  ruler:         require('../../assets/icons/ruler.png'),
-  cherryBlossom: require('../../assets/icons/cherry_blossom.png'),
-  redApple:      require('../../assets/icons/red_apple.png'),
-  house:         require('../../assets/icons/house.png'),
-  warning:          require('../../assets/icons/warning.png'),
-  catFace:          require('../../assets/icons/cat_face.png'),
-} as const;
+// Consistent line-icon language (Ionicons in tinted circles) replaces the
+// old mixed emoji-PNG icons — matches plant/[id].tsx.
+function InfoIcon({ name, color }: { name: string; color: string }) {
+  return (
+    <View style={{
+      width: 30, height: 30, borderRadius: 15,
+      backgroundColor: `${color}1F`,
+      justifyContent: 'center', alignItems: 'center',
+    }}>
+      <Ionicons name={name as any} size={16} color={color} />
+    </View>
+  );
+}
 
 const HEALTH_MAP: Record<HealthStatus, number> = {
   healthy: 100,
@@ -134,6 +149,27 @@ export default function ScanScreen() {
   const [spaces, setSpaces]             = useState<Space[]>([]);
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
   const [showCreateSpace, setShowCreateSpace] = useState(false);
+  const [tipIndex, setTipIndex]         = useState(0);
+  const xpAnim = useRef(new Animated.Value(0)).current;
+
+  // Rotate the analyzing tips while waiting on the AI.
+  useEffect(() => {
+    if (phase !== 'analyzing') return;
+    setTipIndex(0);
+    const interval = setInterval(() => {
+      setTipIndex(i => (i + 1) % ANALYZING_TIPS.length);
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [phase]);
+
+  // Pop-in animation for the XP banner — the core reward moment shouldn't
+  // just appear statically.
+  useEffect(() => {
+    if (xpTotal !== null) {
+      xpAnim.setValue(0);
+      Animated.spring(xpAnim, { toValue: 1, useNativeDriver: true, friction: 5, tension: 120 }).start();
+    }
+  }, [xpTotal, xpAnim]);
 
   useEffect(() => {
     supabase.from('spaces').select('*').order('created_at', { ascending: true }).then(({ data }) => {
@@ -198,8 +234,9 @@ export default function ScanScreen() {
       };
 
       if (d.is_grass) {
-        const grassStatus = await getScanStatus();
-        if (grassStatus?.tier === 'free') {
+        // Reuse the tier from the pre-scan check — the second network call
+        // here was redundant.
+        if (scanStatus?.tier === 'free') {
           Alert.alert(
             'Upgrade Required',
             'Lawn & Grass Care Planning is a Basic/Pro feature — upgrade to unlock AI-powered lawn setup and care plans.',
@@ -209,9 +246,10 @@ export default function ScanScreen() {
             ],
           );
           setPhase('camera');
-        } else {
-          setPhase('grass');
+          // Deliberately no XP here — the user got nothing from this scan.
+          return;
         }
+        setPhase('grass');
       } else {
         setResult({
           name: d.name,
@@ -246,15 +284,9 @@ export default function ScanScreen() {
         setPhase('result');
       }
 
-      // Meter the scan against the user's tier — fire and forget, not
-      // gated on the user later saving/favouriting the result.
-      incrementScanCount();
-
-      // Award +30 XP — fire and forget
-      supabase
-        .rpc('increment_xp', { xp_amount: 30 })
-        .then(({ data: xp }) => setXpTotal(typeof xp === 'number' ? xp : 30))
-        .catch(() => setXpTotal(30));
+      // Scan metering now happens server-side inside detect-plant.
+      // Award scan XP — fire and forget; the server decides the amount.
+      awardXP('scan').then((total) => setXpTotal(total ?? 30));
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Analysis failed. Please try again.';
       setAnalyzeError(msg);
@@ -361,7 +393,7 @@ export default function ScanScreen() {
       if (plantErr || !plant) throw new Error(plantErr?.message ?? 'Failed to save plant');
 
       // Journal entries (fire-and-forget)
-      const journalRows: { plant_id: string; user_id: string; entry_type: string; message: string }[] = [
+      const journalRows: { plant_id: string; user_id: string; entry_type: JournalEntryType; message: string }[] = [
         { plant_id: plant.id, user_id: user.id, entry_type: 'added', message: `Added ${result.name} to your garden` },
       ];
       if (result.healthIssues.length > 0) {
@@ -472,7 +504,7 @@ export default function ScanScreen() {
       if (favErr) throw new Error(favErr.message);
 
       if (isNewSpecies) {
-        supabase.rpc('increment_xp', { xp_amount: 10 }).then(null, () => {});
+        awardXP('new_species'); // fire and forget — server decides the amount
       }
 
       setFavourited(true);
@@ -538,7 +570,7 @@ export default function ScanScreen() {
           <View style={styles.analyzingOverlay}>
             <ActivityIndicator size="large" color={Colors.primary} />
             <Text style={styles.analyzingTitle}>Analyzing your plant…</Text>
-            <Text style={styles.analyzingSubtitle}>Powered by Claude AI</Text>
+            <Text style={styles.analyzingSubtitle}>{ANALYZING_TIPS[tipIndex]}</Text>
           </View>
         </View>
       </SafeAreaView>
@@ -600,10 +632,10 @@ export default function ScanScreen() {
               <Image source={{ uri: photoUri }} style={styles.resultPhoto} resizeMode="cover" />
             ) : null}
             {xpTotal !== null ? (
-              <View style={styles.xpBanner}>
+              <Animated.View style={[styles.xpBanner, { opacity: xpAnim, transform: [{ scale: xpAnim }] }]}>
                 <Ionicons name="star" size={13} color={Colors.xp} />
                 <Text style={styles.xpBannerText}>+30 XP earned!</Text>
-              </View>
+              </Animated.View>
             ) : null}
             <TouchableOpacity
               style={styles.favouriteBtn}
@@ -645,13 +677,13 @@ export default function ScanScreen() {
             <Text style={styles.sectionLabel}>Care Requirements</Text>
             <View style={styles.infoGrid}>
               {[
-                { icon: ICONS.waterDrop,   label: 'Watering',    value: `Every ${wDays} day${wDays === 1 ? '' : 's'}`, level: wateringLevel, barColor: WATER_COLOR },
-                { icon: ICONS.sun,         label: 'Sunlight',    value: SUNLIGHT_LABELS[result.sunlight] ?? result.sunlight, level: sunlightLevel, barColor: Colors.xp },
-                { icon: ICONS.seedling,    label: 'Soil',        value: result.soilType, level: undefined as number | undefined, barColor: undefined as string | undefined },
-                { icon: ICONS.thermometer, label: 'Temperature', value: result.temperature, level: undefined as number | undefined, barColor: undefined as string | undefined },
-              ].map(({ icon, label, value, level, barColor }) => (
+                { icon: 'water',       tint: WATER_COLOR,    label: 'Watering',    value: `Every ${wDays} day${wDays === 1 ? '' : 's'}`, level: wateringLevel, barColor: WATER_COLOR },
+                { icon: 'sunny',       tint: Colors.xp,      label: 'Sunlight',    value: SUNLIGHT_LABELS[result.sunlight] ?? result.sunlight, level: sunlightLevel, barColor: Colors.xp },
+                { icon: 'leaf',        tint: Colors.primary, label: 'Soil',        value: result.soilType, level: undefined as number | undefined, barColor: undefined as string | undefined },
+                { icon: 'thermometer', tint: Colors.serious, label: 'Temperature', value: result.temperature, level: undefined as number | undefined, barColor: undefined as string | undefined },
+              ].map(({ icon, tint, label, value, level, barColor }) => (
                 <View key={label} style={styles.infoItem}>
-                  <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
+                  <InfoIcon name={icon} color={tint} />
                   <Text style={styles.infoLabel}>{label}</Text>
                   <Text style={styles.infoValue} numberOfLines={2}>{value}</Text>
                   {level !== undefined && barColor !== undefined && (
@@ -666,8 +698,8 @@ export default function ScanScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Toxicity</Text>
             <View style={styles.toxicityRow}>
-              <ToxicitySeverityBar label="Humans" icon={ICONS.warning} severity={result.humanToxicitySeverity} />
-              <ToxicitySeverityBar label="Pets" icon={ICONS.catFace} severity={result.petToxicitySeverity} />
+              <ToxicitySeverityBar label="Humans" iconName="person" severity={result.humanToxicitySeverity} />
+              <ToxicitySeverityBar label="Pets" iconName="paw" severity={result.petToxicitySeverity} />
             </View>
             {result.toxicityNote && (
               <Text style={styles.toxicityNote}>{result.toxicityNote}</Text>
@@ -679,13 +711,13 @@ export default function ScanScreen() {
             <Text style={styles.sectionLabel}>Plant Details</Text>
             <View style={styles.infoGrid}>
               {[
-                { icon: ICONS.ruler,         label: 'Max Height',       value: result.maxHeight,                                                       muted: false },
-                { icon: ICONS.cherryBlossom, label: 'Flowering Season', value: result.floweringSeason === 'N/A' ? 'Not applicable' : result.floweringSeason, muted: result.floweringSeason === 'N/A' },
-                { icon: ICONS.redApple,      label: 'Fruiting Season',  value: result.fruitingSeason === 'N/A' ? 'Not applicable' : result.fruitingSeason,   muted: result.fruitingSeason === 'N/A' },
-                { icon: ICONS.house,         label: 'Suitability',      value: GROWING_LOCATION_LABELS[result.growingLocation] ?? result.growingLocation,   muted: false },
-              ].map(({ icon, label, value, muted }) => (
+                { icon: 'resize',    tint: Colors.primary, label: 'Max Height',       value: result.maxHeight,                                                       muted: false },
+                { icon: 'flower',    tint: '#D4537E',      label: 'Flowering Season', value: result.floweringSeason === 'N/A' ? 'Not applicable' : result.floweringSeason, muted: result.floweringSeason === 'N/A' },
+                { icon: 'nutrition', tint: Colors.danger,  label: 'Fruiting Season',  value: result.fruitingSeason === 'N/A' ? 'Not applicable' : result.fruitingSeason,   muted: result.fruitingSeason === 'N/A' },
+                { icon: 'home',      tint: Colors.rare,    label: 'Suitability',      value: GROWING_LOCATION_LABELS[result.growingLocation] ?? result.growingLocation,   muted: false },
+              ].map(({ icon, tint, label, value, muted }) => (
                 <View key={label} style={styles.infoItem}>
-                  <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
+                  <InfoIcon name={icon} color={tint} />
                   <Text style={styles.infoLabel}>{label}</Text>
                   <Text style={[styles.infoValue, muted && styles.infoValueMuted]} numberOfLines={2}>{value}</Text>
                 </View>
@@ -719,23 +751,26 @@ export default function ScanScreen() {
           {result.homeTips.length > 0 && (
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>
-                {result.isHealthy ? '🏠 Prevention Tips' : '🏠 Home Remedies'}
+                {result.isHealthy ? 'Prevention Tips' : 'Home Remedies'}
               </Text>
-              {result.homeTips.map((step, i) => (
-                <View key={i} style={styles.fixRow}>
-                  <View style={styles.fixNum}>
-                    <Text style={styles.fixNumText}>{i + 1}</Text>
+              {result.homeTips.map((step, i) => {
+                const { icon, text } = parseTip(step);
+                return (
+                  <View key={i} style={styles.fixRow}>
+                    <View style={[styles.fixNum, { backgroundColor: `${Colors.primary}1F` }]}>
+                      <Ionicons name={icon as any} size={13} color={Colors.primary} />
+                    </View>
+                    <Text style={styles.fixText}>{text}</Text>
                   </View>
-                  <Text style={styles.fixText}>{step}</Text>
-                </View>
-              ))}
+                );
+              })}
             </View>
           )}
 
           {/* Pro tips */}
           {result.proTips.length > 0 && (
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>🔬 Pro Tips</Text>
+              <Text style={styles.sectionLabel}>Pro Tips</Text>
               {result.proTips.map((step, i) => (
                 <View key={i} style={styles.fixRow}>
                   <View style={[styles.fixNum, styles.fixNumPro]}>
@@ -786,9 +821,17 @@ export default function ScanScreen() {
             </View>
           </View>
 
-          {/* Actions */}
+          <TouchableOpacity style={styles.secondaryBtn} onPress={resetScan} activeOpacity={0.7}>
+            <Ionicons name="scan-outline" size={17} color={Colors.primary} />
+            <Text style={styles.secondaryBtnText}>Scan Another Plant</Text>
+          </TouchableOpacity>
+        </ScrollView>
+
+        {/* Sticky footer — Save is the primary action and shouldn't require
+            scrolling past six sections to find. */}
+        <View style={styles.stickyFooter}>
           <TouchableOpacity
-            style={[styles.primaryBtn, styles.saveBtn, saved && styles.saveBtnDone]}
+            style={[styles.primaryBtn, saved && styles.saveBtnDone]}
             onPress={handleSaveToGarden}
             disabled={saving || saved}
             activeOpacity={0.85}
@@ -807,12 +850,7 @@ export default function ScanScreen() {
               </>
             )}
           </TouchableOpacity>
-
-          <TouchableOpacity style={styles.secondaryBtn} onPress={resetScan} activeOpacity={0.7}>
-            <Ionicons name="scan-outline" size={17} color={Colors.primary} />
-            <Text style={styles.secondaryBtnText}>Scan Another Plant</Text>
-          </TouchableOpacity>
-        </ScrollView>
+        </View>
 
         <CreateSpaceModal
           visible={showCreateSpace}
@@ -917,7 +955,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   analyzingWrap: { flex: 1 },
   analyzingPhoto: { width: '100%', height: '100%' },
   analyzingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(13,40,24,0.78)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1090,8 +1128,14 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   fixNumText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.background },
   fixText: { flex: 1, fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 20 },
 
-  saveBtn: { marginTop: Spacing.sm },
   saveBtnDone: { backgroundColor: Colors.primaryDark },
+  stickyFooter: {
+    padding: Spacing.md,
+    paddingBottom: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    backgroundColor: Colors.background,
+  },
 
   // ── Camera screen ─────────────────────────────────────────────────────────
   cameraWrap: {
@@ -1117,7 +1161,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.xs,
-    backgroundColor: '#2D1010',
+    backgroundColor: 'rgba(231,76,60,0.12)', // theme-agnostic danger wash
     borderRadius: Radius.md,
     padding: Spacing.sm,
     borderWidth: 1,

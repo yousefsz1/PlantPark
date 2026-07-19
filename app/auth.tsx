@@ -10,6 +10,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Image,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,6 +27,7 @@ const SUPABASE_ERRORS: Record<string, string> = {
   'Email not confirmed': 'Please confirm your email address before logging in.',
   'Password should be at least 6 characters': 'Password must be at least 6 characters.',
   'Unable to validate email address: invalid format': 'Enter a valid email address.',
+  'For security purposes, you can only request this after': 'Please wait a moment before requesting another reset email.',
 };
 
 function friendlyError(message: string): string {
@@ -48,6 +50,9 @@ export default function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [awaitingEmailConfirm, setAwaitingEmailConfirm] = useState(false);
+  const [awaitingResetConfirm, setAwaitingResetConfirm] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
 
   function clearError() {
     if (error) setError(null);
@@ -102,6 +107,74 @@ export default function AuthScreen() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function sendResetEmail(targetEmail: string) {
+    setResetLoading(true);
+    try {
+      const { error: err } = await supabase.auth.resetPasswordForEmail(targetEmail, {
+        redirectTo: 'plantpark://reset-password',
+      });
+      if (err) {
+        Alert.alert('Error', friendlyError(err.message));
+        return;
+      }
+      setResetEmail(targetEmail);
+      setAwaitingResetConfirm(true);
+    } finally {
+      setResetLoading(false);
+    }
+  }
+
+  function handleForgotPassword() {
+    if (EMAIL_RE.test(email.trim())) {
+      sendResetEmail(email.trim());
+      return;
+    }
+    Alert.prompt(
+      'Reset Password',
+      "Enter your email address and we'll send you a link to reset your password.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send Link',
+          onPress: (value?: string) => {
+            if (value && EMAIL_RE.test(value.trim())) sendResetEmail(value.trim());
+          },
+        },
+      ],
+      'plain-text',
+      email.trim(),
+      'email-address',
+    );
+  }
+
+  // ─── Password reset confirmation holding screen ───────────────────────────
+  if (awaitingResetConfirm) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.confirmContainer}>
+          <View style={styles.confirmIconCircle}>
+            <Ionicons name="mail-unread-outline" size={48} color={Colors.primary} />
+          </View>
+          <Text style={styles.confirmTitle}>Check your email</Text>
+          <Text style={styles.confirmBody}>
+            We sent a password reset link to
+          </Text>
+          <Text style={styles.confirmEmail}>{resetEmail}</Text>
+          <Text style={styles.confirmBody}>
+            Click the link in that email to set a new password, then come back to log in.
+          </Text>
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => setAwaitingResetConfirm(false)}
+          >
+            <Ionicons name="arrow-back" size={16} color={Colors.primary} />
+            <Text style={styles.backBtnText}>Back to Log In</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   // ─── Email confirmation holding screen ────────────────────────────────────
@@ -256,6 +329,16 @@ export default function AuthScreen() {
                   />
                 </TouchableOpacity>
               </View>
+              {mode === 'login' && (
+                <TouchableOpacity
+                  style={styles.forgotPasswordLink}
+                  onPress={handleForgotPassword}
+                  disabled={resetLoading}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* Error message */}
@@ -364,6 +447,8 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     color: Colors.textPrimary,
     padding: 0,
   },
+  forgotPasswordLink: { alignSelf: 'flex-end', marginTop: 6 },
+  forgotPasswordText: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: '600' },
 
   // Error
   errorBox: {

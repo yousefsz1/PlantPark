@@ -22,7 +22,8 @@ import { supabase } from '../../lib/supabase';
 import { scheduleTaskNotification, cancelPlantNotifications } from '../../lib/notifications';
 import { getLevel, xpToNextLevel } from '../../lib/levels';
 import { getWateringLevel, getSunlightLevel, WATER_COLOR } from '../../lib/careLevels';
-import type { Plant, CareTask, PlantPhoto, Space } from '../../types/database';
+import { parseTip } from '../../lib/tipIcons';
+import type { Plant, CareTask, PlantPhoto, Space, JournalEntryType } from '../../types/database';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import ToxicitySeverityBar from '../../components/ToxicitySeverityBar';
@@ -108,18 +109,19 @@ const GROWING_LOCATION_LABELS: Record<string, string> = {
   both: 'Both',
 };
 
-const ICONS = {
-  waterDrop:     require('../../assets/icons/water_drop.png'),
-  sun:           require('../../assets/icons/sun.png'),
-  seedling:      require('../../assets/icons/seedling.png'),
-  thermometer:   require('../../assets/icons/thermometer.png'),
-  ruler:         require('../../assets/icons/ruler.png'),
-  cherryBlossom: require('../../assets/icons/cherry_blossom.png'),
-  redApple:      require('../../assets/icons/red_apple.png'),
-  house:         require('../../assets/icons/house.png'),
-  warning:          require('../../assets/icons/warning.png'),
-  catFace:          require('../../assets/icons/cat_face.png'),
-} as const;
+// Consistent line-icon language (Ionicons in tinted circles) replaces the
+// old mixed emoji-PNG icons — part of the modern UI pass.
+function InfoIcon({ name, color }: { name: string; color: string }) {
+  return (
+    <View style={{
+      width: 30, height: 30, borderRadius: 15,
+      backgroundColor: `${color}1F`,
+      justifyContent: 'center', alignItems: 'center',
+    }}>
+      <Ionicons name={name as any} size={16} color={color} />
+    </View>
+  );
+}
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -367,7 +369,7 @@ export default function PlantDetailScreen() {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const xp = result?.xp_reward ?? 10;
-          const jRows: { plant_id: string; user_id: string; entry_type: string; message: string }[] = [
+          const jRows: { plant_id: string; user_id: string; entry_type: JournalEntryType; message: string }[] = [
             { plant_id: plantId, user_id: user.id, entry_type: 'watered', message: `Watered ${plant.name} +${xp} XP` },
           ];
           if (result?.new_xp && getLevel(result.new_xp).name !== getLevel(totalXP).name) {
@@ -551,17 +553,17 @@ export default function PlantDetailScreen() {
   const heroPhotoIndex = Math.max(0, galleryPhotos.findIndex(p => p.id === 'hero'));
 
   const infoItems = [
-    { icon: ICONS.waterDrop,   label: 'Watering',     value: plant.watering_frequency ? WATERING_LABELS[plant.watering_frequency] : '—', level: wateringLevel, barColor: WATER_COLOR },
-    { icon: ICONS.sun,         label: 'Sunlight',     value: plant.sunlight ? SUNLIGHT_LABELS[plant.sunlight] : '—', level: sunlightLevel, barColor: Colors.xp },
-    { icon: ICONS.seedling,    label: 'Soil',         value: plant.soil_type ?? '—', level: undefined as number | undefined, barColor: undefined as string | undefined },
-    { icon: ICONS.thermometer, label: 'Temperature',  value: plant.temperature_range ?? '—', level: undefined as number | undefined, barColor: undefined as string | undefined },
+    { icon: 'water',       tint: WATER_COLOR,     label: 'Watering',     value: plant.watering_frequency ? WATERING_LABELS[plant.watering_frequency] : '—', level: wateringLevel, barColor: WATER_COLOR },
+    { icon: 'sunny',       tint: Colors.xp,       label: 'Sunlight',     value: plant.sunlight ? SUNLIGHT_LABELS[plant.sunlight] : '—', level: sunlightLevel, barColor: Colors.xp },
+    { icon: 'leaf',        tint: Colors.primary,  label: 'Soil',         value: plant.soil_type ?? '—', level: undefined as number | undefined, barColor: undefined as string | undefined },
+    { icon: 'thermometer', tint: Colors.serious,  label: 'Temperature',  value: plant.temperature_range ?? '—', level: undefined as number | undefined, barColor: undefined as string | undefined },
   ] as const;
 
   const detailItems = [
-    { icon: ICONS.ruler,         label: 'Max Height',       value: plant.max_height ?? '—',                                              muted: false },
-    { icon: ICONS.cherryBlossom, label: 'Flowering Season', value: plant.flowering_season === 'N/A' ? 'Not applicable' : (plant.flowering_season ?? '—'), muted: plant.flowering_season === 'N/A' },
-    { icon: ICONS.redApple,      label: 'Fruiting Season', value: plant.fruiting_season === 'N/A' ? 'Not applicable' : (plant.fruiting_season ?? '—'),   muted: plant.fruiting_season === 'N/A' },
-    { icon: ICONS.house,         label: 'Suitability',      value: plant.growing_location ? (GROWING_LOCATION_LABELS[plant.growing_location] ?? plant.growing_location) : '—', muted: false },
+    { icon: 'resize',    tint: Colors.primary,  label: 'Max Height',       value: plant.max_height ?? '—',                                              muted: false },
+    { icon: 'flower',    tint: '#D4537E',       label: 'Flowering Season', value: plant.flowering_season === 'N/A' ? 'Not applicable' : (plant.flowering_season ?? '—'), muted: plant.flowering_season === 'N/A' },
+    { icon: 'nutrition', tint: Colors.danger,   label: 'Fruiting Season', value: plant.fruiting_season === 'N/A' ? 'Not applicable' : (plant.fruiting_season ?? '—'),   muted: plant.fruiting_season === 'N/A' },
+    { icon: 'home',      tint: Colors.rare,     label: 'Suitability',      value: plant.growing_location ? (GROWING_LOCATION_LABELS[plant.growing_location] ?? plant.growing_location) : '—', muted: false },
   ] as const;
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -615,7 +617,7 @@ export default function PlantDetailScreen() {
         <View style={styles.statsCard}>
           <View style={styles.statsRow}>
             <View style={styles.levelChip}>
-              <Ionicons name="leaf" size={11} color={Colors.textPrimary} />
+              <Ionicons name="leaf" size={11} color="#A8E6CF" />
               <Text style={styles.levelChipText}>{level.name}</Text>
             </View>
             <Text style={styles.xpLabel}>{totalXP.toLocaleString()} XP</Text>
@@ -673,8 +675,8 @@ export default function PlantDetailScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Next Watering</Text>
           <View style={[styles.waterCard, watering.urgent && styles.waterCardUrgent]}>
-            <Ionicons name="water" size={36} color={watering.color} style={{ marginBottom: 4 }} />
-            <Text style={[styles.waterText, { color: watering.color }]}>{watering.text}</Text>
+            <Ionicons name="water" size={36} color={WATER_COLOR} style={{ marginBottom: 4 }} />
+            <Text style={[styles.waterText, { color: watering.urgent ? watering.color : WATER_COLOR }]}>{watering.text}</Text>
             {wateringProgress !== null && (
               <View style={styles.waterProgressTrack}>
                 <View
@@ -764,8 +766,8 @@ export default function PlantDetailScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Toxicity</Text>
             <View style={styles.toxicityRow}>
-              <ToxicitySeverityBar label="Humans" icon={ICONS.warning} severity={plant.human_toxicity_severity ?? 0} />
-              <ToxicitySeverityBar label="Pets" icon={ICONS.catFace} severity={plant.pet_toxicity_severity ?? 0} />
+              <ToxicitySeverityBar label="Humans" iconName="person" severity={plant.human_toxicity_severity ?? 0} />
+              <ToxicitySeverityBar label="Pets" iconName="paw" severity={plant.pet_toxicity_severity ?? 0} />
             </View>
             {plant.toxicity_note && (
               <Text style={styles.toxicityNote}>{plant.toxicity_note}</Text>
@@ -777,9 +779,9 @@ export default function PlantDetailScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Plant Details</Text>
           <View style={styles.infoGrid}>
-            {detailItems.map(({ icon, label, value, muted }) => (
+            {detailItems.map(({ icon, tint, label, value, muted }) => (
               <View key={label} style={styles.infoItem}>
-                <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
+                <InfoIcon name={icon} color={tint} />
                 <Text style={styles.infoLabel}>{label}</Text>
                 <Text style={[styles.infoValue, muted && styles.infoValueMuted]} numberOfLines={2}>{value}</Text>
               </View>
@@ -791,9 +793,9 @@ export default function PlantDetailScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Care Requirements</Text>
           <View style={styles.infoGrid}>
-            {infoItems.map(({ icon, label, value, level, barColor }) => (
+            {infoItems.map(({ icon, tint, label, value, level, barColor }) => (
               <View key={label} style={styles.infoItem}>
-                <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
+                <InfoIcon name={icon} color={tint} />
                 <Text style={styles.infoLabel}>{label}</Text>
                 <Text style={styles.infoValue} numberOfLines={2}>{value}</Text>
                 {level !== undefined && barColor !== undefined && (
@@ -836,11 +838,11 @@ export default function PlantDetailScreen() {
               </View>
             ) : null}
 
-            <Text style={styles.healthCheckDate}>
-              {plant.health_checked_at
-                ? `Last checked: ${new Date(plant.health_checked_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                : 'Not checked yet'}
-            </Text>
+            {plant.health_checked_at ? (
+              <Text style={styles.healthCheckDate}>
+                {`Last checked: ${new Date(plant.health_checked_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`}
+              </Text>
+            ) : null}
 
             <TouchableOpacity
               style={[styles.recheckBtn, checkingHealth && styles.disabled]}
@@ -894,21 +896,25 @@ export default function PlantDetailScreen() {
                   </View>
                 )}
 
-                <Text style={styles.subLabel}>🏠 Home Remedies</Text>
+                <Text style={styles.subLabel}>Home Remedies</Text>
                 <View style={styles.remediesList}>
-                  {plant.health_remedies!.map((remedy, i) => (
-                    <View key={i} style={[styles.remedyRow, hasIssues && styles.remedyRowWarning]}>
-                      <View style={[styles.remedyBadge, hasIssues && styles.remedyBadgeWarning]}>
-                        <Text style={styles.remedyBadgeText}>{i + 1}</Text>
+                  {plant.health_remedies!.map((remedy, i) => {
+                    const { icon, text } = parseTip(remedy);
+                    const tint = hasIssues ? Colors.warning : Colors.primary;
+                    return (
+                      <View key={i} style={[styles.remedyRow, hasIssues && styles.remedyRowWarning]}>
+                        <View style={[styles.remedyIconCircle, { backgroundColor: `${tint}1F` }]}>
+                          <Ionicons name={icon as any} size={14} color={tint} />
+                        </View>
+                        <Text style={styles.remedyText}>{text}</Text>
                       </View>
-                      <Text style={styles.remedyText}>{remedy.replace(/️/g, '')}</Text>
-                    </View>
-                  ))}
+                    );
+                  })}
                 </View>
 
                 {hasProTips && (
                   <View style={styles.proTipsSection}>
-                    <Text style={styles.subLabel}>🔬 Pro Tips</Text>
+                    <Text style={styles.subLabel}>Pro Tips</Text>
                     <View style={styles.remediesList}>
                       {plant.health_tips_pro!.map((tip, i) => (
                         <View key={i} style={styles.remedyRow}>
@@ -1097,7 +1103,9 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   },
   heroMeta: {
     position: 'absolute',
-    bottom: Spacing.md,
+    // Clears the stats card, which overlaps the hero's bottom by Spacing.xl —
+    // at Spacing.md the species line was hidden behind the card.
+    bottom: Spacing.xl + Spacing.md,
     left: Spacing.md,
     right: Spacing.md,
   },
@@ -1120,20 +1128,19 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   },
 
   // Stats card
+  // Glossy floating card: big radius, no hard border, soft deep shadow
   statsCard: {
     marginHorizontal: Spacing.md,
     marginTop: -Spacing.xl,
     backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
-    padding: Spacing.md,
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
     gap: 6,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 6,
+    shadowColor: '#0A3D1E',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
+    elevation: 10,
   },
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   levelChip: {
@@ -1145,7 +1152,7 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     paddingHorizontal: 12,
     paddingVertical: 4,
   },
-  levelChipText: { fontSize: FontSize.sm, fontWeight: '700', color: Colors.textPrimary },
+  levelChipText: { fontSize: FontSize.sm, fontWeight: '700', color: '#A8E6CF' },
   xpLabel:  { fontSize: FontSize.sm, fontWeight: '600', color: Colors.xp },
   xpNext:   { fontSize: FontSize.xs, color: Colors.textMuted },
   healthLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
@@ -1375,6 +1382,14 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
     padding: Spacing.sm,
   },
   remedyRowWarning: { backgroundColor: 'rgba(243,156,18,0.07)' },
+  remedyIconCircle: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
   remedyBadge: {
     width: 22,
     height: 22,

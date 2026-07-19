@@ -1,8 +1,10 @@
 import { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Share } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Share, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../../lib/supabase';
 import { getScanStatus, type MembershipTier } from '../../lib/scanLimits';
 import { getLevel, xpToNextLevel } from '../../lib/levels';
@@ -26,19 +28,25 @@ function getTierBadgeConfig(Colors: ColorPalette): Record<MembershipTier, { labe
   };
 }
 
-const BADGES = [
-  { id: '1', icon: 'leaf',    label: 'First Plant', unlocked: true },
-  { id: '2', icon: 'flame',   label: '7-Day Streak', unlocked: true },
-  { id: '3', icon: 'trophy',  label: 'Level 5',     unlocked: true },
-  { id: '4', icon: 'star',    label: 'Rare Find',   unlocked: false },
-  { id: '5', icon: 'ribbon',  label: 'Expert',      unlocked: false },
-  { id: '6', icon: 'diamond', label: 'Legendary',   unlocked: false },
-] as const;
+// Badges are computed from REAL data (previously the whole grid was
+// hardcoded — every new account showed "7-Day Streak" etc. as unlocked).
+// Streak/Rare Find/Expert stay locked until their tracking systems exist.
+function getBadges(plantCount: number, totalXP: number) {
+  return [
+    { id: '1', icon: 'leaf',    label: 'First Plant',  unlocked: plantCount > 0 },
+    { id: '2', icon: 'flame',   label: '7-Day Streak', unlocked: false },
+    { id: '3', icon: 'trophy',  label: 'Green Thumb',  unlocked: getLevel(totalXP).minXP >= 1800 },
+    { id: '4', icon: 'star',    label: 'Rare Find',    unlocked: false },
+    { id: '5', icon: 'ribbon',  label: 'Garden Sage',  unlocked: getLevel(totalXP).minXP >= 7000 },
+    { id: '6', icon: 'diamond', label: 'Master',       unlocked: getLevel(totalXP).minXP >= 12000 },
+  ] as const;
+}
 
+// "Reminders" was removed — it was a dead row with no route or action.
 const MENU_ITEMS = [
+  { icon: 'podium-outline',        label: 'Global Ranking', route: '/leaderboard', action: undefined },
   { icon: 'card-outline',          label: 'Membership',   route: '/membership', action: undefined },
   { icon: 'settings-outline',      label: 'Settings',      route: '/settings',   action: undefined },
-  { icon: 'notifications-outline', label: 'Reminders',     route: undefined,     action: undefined },
   { icon: 'share-social-outline',  label: 'Share App',     route: undefined,     action: 'share' as const },
   { icon: 'help-circle-outline',   label: 'Help & FAQ',    route: '/help',       action: undefined },
 ] as const;
@@ -51,16 +59,69 @@ export default function ProfileScreen() {
   const [signingOut, setSigningOut] = useState(false);
   const [tier, setTier] = useState<MembershipTier>('free');
   const [totalXP, setTotalXP] = useState(0);
+  const [plantCount, setPlantCount] = useState(0);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       supabase.auth.getUser().then(({ data }) => setUser(data.user));
       getScanStatus().then((status) => setTier(status?.tier ?? 'free'));
-      supabase.from('profiles').select('total_xp').maybeSingle().then(({ data }) => {
+      supabase.from('profiles').select('total_xp, avatar_url').maybeSingle().then(({ data }) => {
         setTotalXP(data?.total_xp ?? 0);
+        setAvatarUrl(data?.avatar_url ?? null);
+      });
+      supabase.from('plants').select('id', { count: 'exact', head: true }).then(({ count }) => {
+        setPlantCount(count ?? 0);
       });
     }, []),
   );
+
+  // Pick a photo → square-crop → resize to 256px → upload to the user's own
+  // storage folder → save the URL via RPC (direct profile writes are blocked
+  // by design). A unique filename per upload avoids stale CDN caches.
+  const handleChangeAvatar = useCallback(async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow photo library access to set a profile picture.');
+      return;
+    }
+    const picked = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'] as ImagePicker.MediaType[],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
+    });
+    if (picked.canceled || !picked.assets?.[0]) return;
+
+    setUploadingAvatar(true);
+    try {
+      const compressed = await ImageManipulator.manipulateAsync(
+        picked.assets[0].uri,
+        [{ resize: { width: 256 } }],
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+      );
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) throw new Error('Not signed in');
+
+      const bytes = Uint8Array.from(atob(compressed.base64!), c => c.charCodeAt(0));
+      const path = `${authUser.id}/avatar-${Date.now()}.jpg`;
+      const { data: up, error: upErr } = await supabase.storage
+        .from('plant-images')
+        .upload(path, bytes, { contentType: 'image/jpeg' });
+      if (upErr || !up) throw new Error(upErr?.message ?? 'Upload failed');
+
+      const { data: urlData } = supabase.storage.from('plant-images').getPublicUrl(up.path);
+      const { error: rpcErr } = await supabase.rpc('set_avatar_url', { p_url: urlData.publicUrl });
+      if (rpcErr) throw rpcErr;
+
+      setAvatarUrl(urlData.publicUrl);
+    } catch (err) {
+      Alert.alert('Could not update photo', err instanceof Error ? err.message : 'Please try again.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }, []);
 
   const handleShareApp = useCallback(() => {
     Share.share({
@@ -77,8 +138,13 @@ export default function ProfileScreen() {
         style: 'destructive',
         onPress: async () => {
           setSigningOut(true);
-          await supabase.auth.signOut();
-          // Navigation back to auth happens automatically via onAuthStateChange in _layout.tsx
+          try {
+            await supabase.auth.signOut();
+            // Navigation back to auth happens automatically via onAuthStateChange in _layout.tsx
+          } finally {
+            // Reset in case sign-out failed — otherwise the spinner spins forever.
+            setSigningOut(false);
+          }
         },
       },
     ]);
@@ -94,11 +160,24 @@ export default function ProfileScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content}>
-        {/* Avatar & name */}
+        {/* Avatar & name — tap the photo to change it */}
         <View style={styles.avatarSection}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarInitials}>{getInitials(displayName)}</Text>
-          </View>
+          <TouchableOpacity onPress={handleChangeAvatar} disabled={uploadingAvatar} activeOpacity={0.8}>
+            {avatarUrl ? (
+              <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+            ) : (
+              <View style={styles.avatar}>
+                <Text style={styles.avatarInitials}>{getInitials(displayName)}</Text>
+              </View>
+            )}
+            <View style={styles.avatarCameraBadge}>
+              {uploadingAvatar ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Ionicons name="camera" size={13} color="#FFFFFF" />
+              )}
+            </View>
+          </TouchableOpacity>
           <Text style={styles.username}>{displayName}</Text>
           <Text style={styles.userEmail}>{displayEmail}</Text>
           <View style={styles.rankBadge}>
@@ -135,7 +214,7 @@ export default function ProfileScreen() {
         {/* Badges */}
         <Text style={styles.sectionTitle}>Badges</Text>
         <View style={styles.badgesGrid}>
-          {BADGES.map((b) => (
+          {getBadges(plantCount, totalXP).map((b) => (
             <View key={b.id} style={[styles.badge, !b.unlocked && styles.badgeLocked]}>
               <Ionicons
                 name={b.icon as any}
@@ -195,13 +274,26 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   avatar: {
     width: 88,
     height: 88,
-    borderRadius: Radius.full,
+    borderRadius: 44,
     backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: Spacing.sm,
   },
   avatarInitials: { fontSize: FontSize.xxl, fontWeight: '700', color: '#FFFFFF' },
+  avatarCameraBadge: {
+    position: 'absolute',
+    bottom: Spacing.sm - 2,
+    right: -2,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Colors.primaryDark,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: Colors.background,
+  },
   username: { fontSize: FontSize.xl, fontWeight: '700', color: Colors.textPrimary },
   userEmail: { fontSize: FontSize.sm, color: Colors.textMuted, marginTop: 2, marginBottom: 6 },
   rankBadge: {

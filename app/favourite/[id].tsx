@@ -39,18 +39,19 @@ const GROWING_LOCATION_LABELS: Record<string, string> = {
   both: 'Both',
 };
 
-const ICONS = {
-  waterDrop:     require('../../assets/icons/water_drop.png'),
-  sun:           require('../../assets/icons/sun.png'),
-  seedling:      require('../../assets/icons/seedling.png'),
-  thermometer:   require('../../assets/icons/thermometer.png'),
-  ruler:         require('../../assets/icons/ruler.png'),
-  cherryBlossom: require('../../assets/icons/cherry_blossom.png'),
-  redApple:      require('../../assets/icons/red_apple.png'),
-  house:         require('../../assets/icons/house.png'),
-  warning:          require('../../assets/icons/warning.png'),
-  catFace:          require('../../assets/icons/cat_face.png'),
-} as const;
+// Consistent line-icon language (Ionicons in tinted circles) — matches
+// plant/[id].tsx, scan.tsx, and add-plant.tsx.
+function InfoIcon({ name, color }: { name: string; color: string }) {
+  return (
+    <View style={{
+      width: 30, height: 30, borderRadius: 15,
+      backgroundColor: `${color}1F`,
+      justifyContent: 'center', alignItems: 'center',
+    }}>
+      <Ionicons name={name as any} size={16} color={color} />
+    </View>
+  );
+}
 
 export default function FavouriteDetailScreen() {
   const { Colors, FontSize } = useTheme();
@@ -126,17 +127,17 @@ export default function FavouriteDetailScreen() {
   const wateringLevel = getWateringLevel(null, favourite.watering_frequency);
   const sunlightLevel = getSunlightLevel(favourite.sunlight);
   const infoItems = [
-    { icon: ICONS.waterDrop,   label: 'Watering',    value: favourite.watering_frequency ? (WATERING_LABELS[favourite.watering_frequency] ?? favourite.watering_frequency) : '—', level: wateringLevel, barColor: WATER_COLOR },
-    { icon: ICONS.sun,         label: 'Sunlight',    value: favourite.sunlight ? (SUNLIGHT_LABELS[favourite.sunlight] ?? favourite.sunlight) : '—', level: sunlightLevel, barColor: Colors.xp },
-    { icon: ICONS.seedling,    label: 'Soil',        value: favourite.soil_type ?? '—', level: undefined as number | undefined, barColor: undefined as string | undefined },
-    { icon: ICONS.thermometer, label: 'Temperature', value: favourite.temperature ?? '—', level: undefined as number | undefined, barColor: undefined as string | undefined },
+    { icon: 'water',       tint: WATER_COLOR,    label: 'Watering',    value: favourite.watering_frequency ? (WATERING_LABELS[favourite.watering_frequency] ?? favourite.watering_frequency) : '—', level: wateringLevel, barColor: WATER_COLOR },
+    { icon: 'sunny',       tint: Colors.xp,      label: 'Sunlight',    value: favourite.sunlight ? (SUNLIGHT_LABELS[favourite.sunlight] ?? favourite.sunlight) : '—', level: sunlightLevel, barColor: Colors.xp },
+    { icon: 'leaf',        tint: Colors.primary, label: 'Soil',        value: favourite.soil_type ?? '—', level: undefined as number | undefined, barColor: undefined as string | undefined },
+    { icon: 'thermometer', tint: Colors.serious, label: 'Temperature', value: favourite.temperature ?? '—', level: undefined as number | undefined, barColor: undefined as string | undefined },
   ] as const;
 
   const detailItems = [
-    { icon: ICONS.ruler,         label: 'Max Height',       value: favourite.max_height ?? '—',                                                    muted: false },
-    { icon: ICONS.cherryBlossom, label: 'Flowering Season', value: favourite.flowering_season === 'N/A' ? 'Not applicable' : (favourite.flowering_season ?? '—'), muted: favourite.flowering_season === 'N/A' },
-    { icon: ICONS.redApple,      label: 'Fruiting Season',  value: favourite.fruiting_season === 'N/A' ? 'Not applicable' : (favourite.fruiting_season ?? '—'),   muted: favourite.fruiting_season === 'N/A' },
-    { icon: ICONS.house,         label: 'Suitability',      value: favourite.growing_location ? (GROWING_LOCATION_LABELS[favourite.growing_location] ?? favourite.growing_location) : '—', muted: false },
+    { icon: 'resize',    tint: Colors.primary, label: 'Max Height',       value: favourite.max_height ?? '—',                                                    muted: false },
+    { icon: 'flower',    tint: '#D4537E',      label: 'Flowering Season', value: favourite.flowering_season === 'N/A' ? 'Not applicable' : (favourite.flowering_season ?? '—'), muted: favourite.flowering_season === 'N/A' },
+    { icon: 'nutrition', tint: Colors.danger,  label: 'Fruiting Season',  value: favourite.fruiting_season === 'N/A' ? 'Not applicable' : (favourite.fruiting_season ?? '—'),   muted: favourite.fruiting_season === 'N/A' },
+    { icon: 'home',      tint: Colors.rare,    label: 'Suitability',      value: favourite.growing_location ? (GROWING_LOCATION_LABELS[favourite.growing_location] ?? favourite.growing_location) : '—', muted: false },
   ] as const;
 
   return (
@@ -186,8 +187,8 @@ export default function FavouriteDetailScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Toxicity</Text>
             <View style={styles.toxicityRow}>
-              <ToxicitySeverityBar label="Humans" icon={ICONS.warning} severity={favourite.human_toxicity_severity ?? 0} />
-              <ToxicitySeverityBar label="Pets" icon={ICONS.catFace} severity={favourite.pet_toxicity_severity ?? 0} />
+              <ToxicitySeverityBar label="Humans" iconName="person" severity={favourite.human_toxicity_severity ?? 0} />
+              <ToxicitySeverityBar label="Pets" iconName="paw" severity={favourite.pet_toxicity_severity ?? 0} />
             </View>
             {favourite.toxicity_note && (
               <Text style={styles.toxicityNote}>{favourite.toxicity_note}</Text>
@@ -199,9 +200,9 @@ export default function FavouriteDetailScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Plant Details</Text>
           <View style={styles.infoGrid}>
-            {detailItems.map(({ icon, label, value, muted }) => (
+            {detailItems.map(({ icon, tint, label, value, muted }) => (
               <View key={label} style={styles.infoItem}>
-                <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
+                <InfoIcon name={icon} color={tint} />
                 <Text style={styles.infoLabel}>{label}</Text>
                 <Text style={[styles.infoValue, muted && styles.infoValueMuted]} numberOfLines={2}>{value}</Text>
               </View>
@@ -213,9 +214,9 @@ export default function FavouriteDetailScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Care Requirements</Text>
           <View style={styles.infoGrid}>
-            {infoItems.map(({ icon, label, value, level, barColor }) => (
+            {infoItems.map(({ icon, tint, label, value, level, barColor }) => (
               <View key={label} style={styles.infoItem}>
-                <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
+                <InfoIcon name={icon} color={tint} />
                 <Text style={styles.infoLabel}>{label}</Text>
                 <Text style={styles.infoValue} numberOfLines={2}>{value}</Text>
                 {level !== undefined && barColor !== undefined && (

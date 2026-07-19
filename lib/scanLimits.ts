@@ -44,13 +44,22 @@ export async function getScanStatus(): Promise<ScanStatus | null> {
   }
 }
 
-// Fire-and-forget after a successful AI identification — never throws.
-// amount defaults to 1 (a regular single-photo scan); Lawn Health Scans pass
-// 3, since they send 3 images in one Gemini call.
-export async function incrementScanCount(amount: number = 1): Promise<void> {
+// Scan counting now happens SERVER-SIDE inside the detect-plant and
+// analyze-grass-health edge functions (see supabase/functions/_shared/
+// scanGuard.ts) — the client no longer increments anything. This closed the
+// hole where limits were only enforced in the app, letting direct API calls
+// run unlimited paid Gemini scans.
+
+// Fixed-amount XP award — the server decides the amount per action, so the
+// client can no longer request arbitrary XP. Fire-and-forget friendly.
+export type XPAction = 'scan' | 'new_species' | 'add_plant';
+
+export async function awardXP(action: XPAction): Promise<number | null> {
   try {
-    await supabase.rpc('increment_scan_count', { p_amount: amount });
+    const { data, error } = await supabase.rpc('award_xp', { p_action: action });
+    if (error) return null;
+    return typeof data === 'number' ? data : null;
   } catch {
-    // Non-fatal — worst case the count under-reports.
+    return null;
   }
 }

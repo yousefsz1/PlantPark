@@ -16,9 +16,9 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../lib/supabase';
 import { requestNotificationPermission, scheduleTaskNotification, cancelPlantNotifications } from '../lib/notifications';
-import { getScanStatus, incrementScanCount } from '../lib/scanLimits';
+import { getScanStatus, awardXP } from '../lib/scanLimits';
 import { getWateringLevel, getSunlightLevel, WATER_COLOR } from '../lib/careLevels';
-import type { Space } from '../types/database';
+import type { Space, JournalEntryType } from '../types/database';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../constants/theme';
 import { useTheme } from '../contexts/ThemeContext';
 import ToxicitySeverityBar from '../components/ToxicitySeverityBar';
@@ -70,18 +70,19 @@ const GROWING_LOCATION_LABELS: Record<string, string> = {
   both: 'Both',
 };
 
-const ICONS = {
-  waterDrop:     require('../assets/icons/water_drop.png'),
-  sun:           require('../assets/icons/sun.png'),
-  seedling:      require('../assets/icons/seedling.png'),
-  thermometer:   require('../assets/icons/thermometer.png'),
-  ruler:         require('../assets/icons/ruler.png'),
-  cherryBlossom: require('../assets/icons/cherry_blossom.png'),
-  redApple:      require('../assets/icons/red_apple.png'),
-  house:         require('../assets/icons/house.png'),
-  warning:          require('../assets/icons/warning.png'),
-  catFace:          require('../assets/icons/cat_face.png'),
-} as const;
+// Consistent line-icon language (Ionicons in tinted circles) — matches
+// plant/[id].tsx and scan.tsx.
+function InfoIcon({ name, color }: { name: string; color: string }) {
+  return (
+    <View style={{
+      width: 30, height: 30, borderRadius: 15,
+      backgroundColor: `${color}1F`,
+      justifyContent: 'center', alignItems: 'center',
+    }}>
+      <Ionicons name={name as any} size={16} color={color} />
+    </View>
+  );
+}
 
 function addDaysToToday(n: number): string {
   const d = new Date();
@@ -150,8 +151,8 @@ export default function AddPlantScreen() {
       if (data?.error) throw new Error(data.error);
       const d = data as DetectedPlant;
       if (d.is_grass) {
-        const grassStatus = await getScanStatus();
-        if (grassStatus?.tier === 'free') {
+        // Reuse the tier from the pre-scan check — no second network call.
+        if (scanStatus?.tier === 'free') {
           Alert.alert(
             'Upgrade Required',
             'Lawn & Grass Care Planning is a Basic/Pro feature — upgrade to unlock AI-powered lawn setup and care plans.',
@@ -168,10 +169,7 @@ export default function AddPlantScreen() {
         setDetected(d);
         setPhase('review');
       }
-
-      // Meter the scan against the user's tier — fire and forget, not
-      // gated on the user later saving/favouriting the result.
-      incrementScanCount();
+      // Scan metering now happens server-side inside detect-plant.
     } catch (err) {
       setAnalyzeError(err instanceof Error ? err.message : 'Detection failed. Please try again.');
       setPhase('capture');
@@ -281,7 +279,7 @@ export default function AddPlantScreen() {
       if (plantErr || !plant) throw new Error(plantErr?.message ?? 'Failed to save plant');
 
       // Journal entries (fire-and-forget)
-      const journalRows: { plant_id: string; user_id: string; entry_type: string; message: string }[] = [
+      const journalRows: { plant_id: string; user_id: string; entry_type: JournalEntryType; message: string }[] = [
         { plant_id: plant.id, user_id: user.id, entry_type: 'added', message: `Added ${detected.name} to your garden` },
       ];
       if (detected.healthIssues.length > 0) {
@@ -312,7 +310,7 @@ export default function AddPlantScreen() {
         }
       }
 
-      supabase.rpc('increment_xp', { xp_amount: 50 }).then(null, () => {});
+      awardXP('add_plant'); // fire and forget — server decides the amount
       router.back();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save plant');
@@ -388,7 +386,7 @@ export default function AddPlantScreen() {
       if (favErr) throw new Error(favErr.message);
 
       if (isNewSpecies) {
-        supabase.rpc('increment_xp', { xp_amount: 10 }).then(null, () => {});
+        awardXP('new_species'); // fire and forget — server decides the amount
       }
 
       setFavourited(true);
@@ -464,16 +462,16 @@ export default function AddPlantScreen() {
     const wateringLevel = getWateringLevel(wDays, detected.wateringFrequency);
     const sunlightLevel = getSunlightLevel(detected.sunlight);
     const infoItems = [
-      { icon: ICONS.waterDrop,   label: 'Watering',    value: `Every ${wDays} day${wDays === 1 ? '' : 's'}`, level: wateringLevel, barColor: WATER_COLOR },
-      { icon: ICONS.sun,         label: 'Sunlight',    value: SUNLIGHT_LABELS[detected.sunlight] ?? detected.sunlight, level: sunlightLevel, barColor: Colors.xp },
-      { icon: ICONS.seedling,    label: 'Soil',        value: detected.soilType, level: undefined as number | undefined, barColor: undefined as string | undefined },
-      { icon: ICONS.thermometer, label: 'Temperature', value: detected.temperature, level: undefined as number | undefined, barColor: undefined as string | undefined },
+      { icon: 'water',       tint: WATER_COLOR,    label: 'Watering',    value: `Every ${wDays} day${wDays === 1 ? '' : 's'}`, level: wateringLevel, barColor: WATER_COLOR },
+      { icon: 'sunny',       tint: Colors.xp,      label: 'Sunlight',    value: SUNLIGHT_LABELS[detected.sunlight] ?? detected.sunlight, level: sunlightLevel, barColor: Colors.xp },
+      { icon: 'leaf',        tint: Colors.primary, label: 'Soil',        value: detected.soilType, level: undefined as number | undefined, barColor: undefined as string | undefined },
+      { icon: 'thermometer', tint: Colors.serious, label: 'Temperature', value: detected.temperature, level: undefined as number | undefined, barColor: undefined as string | undefined },
     ] as const;
     const detailItems = [
-      { icon: ICONS.ruler,         label: 'Max Height',       value: detected.max_height,                                                       muted: false },
-      { icon: ICONS.cherryBlossom, label: 'Flowering Season', value: detected.flowering_season === 'N/A' ? 'Not applicable' : detected.flowering_season, muted: detected.flowering_season === 'N/A' },
-      { icon: ICONS.redApple,      label: 'Fruiting Season',  value: detected.fruiting_season === 'N/A' ? 'Not applicable' : detected.fruiting_season,   muted: detected.fruiting_season === 'N/A' },
-      { icon: ICONS.house,         label: 'Suitability',      value: GROWING_LOCATION_LABELS[detected.growing_location] ?? detected.growing_location,   muted: false },
+      { icon: 'resize',    tint: Colors.primary, label: 'Max Height',       value: detected.max_height,                                                       muted: false },
+      { icon: 'flower',    tint: '#D4537E',      label: 'Flowering Season', value: detected.flowering_season === 'N/A' ? 'Not applicable' : detected.flowering_season, muted: detected.flowering_season === 'N/A' },
+      { icon: 'nutrition', tint: Colors.danger,  label: 'Fruiting Season',  value: detected.fruiting_season === 'N/A' ? 'Not applicable' : detected.fruiting_season,   muted: detected.fruiting_season === 'N/A' },
+      { icon: 'home',      tint: Colors.rare,    label: 'Suitability',      value: GROWING_LOCATION_LABELS[detected.growing_location] ?? detected.growing_location,   muted: false },
     ] as const;
 
     return (
@@ -513,9 +511,9 @@ export default function AddPlantScreen() {
             <Text style={styles.reviewSpecies}>{detected.species}</Text>
 
             <View style={styles.infoGrid}>
-              {infoItems.map(({ icon, label, value, level, barColor }) => (
+              {infoItems.map(({ icon, tint, label, value, level, barColor }) => (
                 <View key={label} style={styles.infoItem}>
-                  <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
+                  <InfoIcon name={icon} color={tint} />
                   <Text style={styles.infoLabel}>{label}</Text>
                   <Text style={styles.infoValue} numberOfLines={2}>{value}</Text>
                   {level !== undefined && barColor !== undefined && (
@@ -526,8 +524,8 @@ export default function AddPlantScreen() {
             </View>
 
             <View style={styles.toxicityRow}>
-              <ToxicitySeverityBar label="Humans" icon={ICONS.warning} severity={detected.human_toxicity_severity ?? 0} />
-              <ToxicitySeverityBar label="Pets" icon={ICONS.catFace} severity={detected.pet_toxicity_severity ?? 0} />
+              <ToxicitySeverityBar label="Humans" iconName="person" severity={detected.human_toxicity_severity ?? 0} />
+              <ToxicitySeverityBar label="Pets" iconName="paw" severity={detected.pet_toxicity_severity ?? 0} />
             </View>
             {detected.toxicityNote && (
               <Text style={styles.toxicityNote}>{detected.toxicityNote}</Text>
@@ -535,9 +533,9 @@ export default function AddPlantScreen() {
 
             <Text style={styles.detailsSectionLabel}>Plant Details</Text>
             <View style={styles.infoGrid}>
-              {detailItems.map(({ icon, label, value, muted }) => (
+              {detailItems.map(({ icon, tint, label, value, muted }) => (
                 <View key={label} style={styles.infoItem}>
-                  <Image source={icon} style={styles.infoIcon} resizeMode="contain" />
+                  <InfoIcon name={icon} color={tint} />
                   <Text style={styles.infoLabel}>{label}</Text>
                   <Text style={[styles.infoValue, muted && styles.infoValueMuted]} numberOfLines={2}>{value}</Text>
                 </View>

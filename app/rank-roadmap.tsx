@@ -27,6 +27,18 @@ export default function RankRoadmapScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.subtitle}>{totalXP.toLocaleString()} XP earned</Text>
 
+        {/* Global Ranking entry — labeled button, clearer than a bare icon */}
+        <TouchableOpacity style={styles.globalRankingBtn} onPress={() => router.push('/leaderboard')} activeOpacity={0.8}>
+          <View style={styles.globalRankingIconWrap}>
+            <Ionicons name="trophy" size={18} color="#F4D03F" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.globalRankingTitle}>Global Ranking</Text>
+            <Text style={styles.globalRankingSubtitle}>See the top 100 gardeners worldwide</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+        </TouchableOpacity>
+
         {LEVELS.map((lvl) => {
           const isCompleted = lvl.minXP < currentLevel.minXP;
           const isCurrent = lvl.minXP === currentLevel.minXP;
@@ -98,6 +110,28 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
 
     content: { padding: Spacing.md, paddingBottom: Spacing.xxl },
     subtitle: { fontSize: FontSize.sm, color: Colors.textMuted, marginBottom: Spacing.md },
+
+    globalRankingBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.md,
+      backgroundColor: Colors.surface,
+      borderRadius: Radius.md,
+      padding: Spacing.md,
+      marginBottom: Spacing.md,
+      borderWidth: 1.5,
+      borderColor: '#F4D03F',
+    },
+    globalRankingIconWrap: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: 'rgba(244,208,63,0.15)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    globalRankingTitle: { fontSize: FontSize.md, fontWeight: '700', color: Colors.textPrimary },
+    globalRankingSubtitle: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: 2 },
 
     tierCard: {
       flexDirection: 'row',

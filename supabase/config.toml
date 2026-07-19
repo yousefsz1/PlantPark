@@ -1,2 +1,7 @@
 [functions.check-rainfall]
 verify_jwt = false
+
+# RevenueCat's servers have no Supabase JWT — authenticated by shared secret
+# inside the function instead (REVENUECAT_WEBHOOK_SECRET).
+[functions.revenuecat-webhook]
+verify_jwt = false

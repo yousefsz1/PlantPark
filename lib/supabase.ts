@@ -13,5 +13,14 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    // @supabase/auth-js defaults flowType to 'implicit' when unset. Without
+    // this, resetPasswordForEmail() never generates a code_challenge, so
+    // Supabase's server issues implicit-flow recovery links
+    // (#access_token=...&refresh_token=...) instead of PKCE links
+    // (?code=...) — silently breaking exchangeCodeForSession() on the
+    // reset-password screen, which always looked for a code that was never
+    // going to exist. See lib/deepLinks.ts for the corresponding link
+    // parsing on the client side.
+    flowType: 'pkce',
   },
 });

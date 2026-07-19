@@ -8,15 +8,25 @@ export type Level = {
   maxXP: number;
 };
 
+// Rebalanced 18 Jul 2026: the old ladder maxed out at 2,800 XP (~3 months of
+// active use). The new curve keeps early levels fast (hook), then roughly
+// doubles per tier — the final tier is a multi-year journey. Client-side
+// only: existing XP simply re-maps onto the new thresholds.
 export const LEVELS: Level[] = [
-  { name: 'Seedling',         emoji: '🌱', icon: 'leaf-outline',   minXP: 0,    maxXP: 99   },
-  { name: 'Sprout',           emoji: '🌿', icon: 'leaf',           minXP: 100,  maxXP: 299  },
-  { name: 'Grower',           emoji: '🪴', icon: 'flower-outline', minXP: 300,  maxXP: 599  },
-  { name: 'Budding Gardener', emoji: '🌷', icon: 'flower',         minXP: 600,  maxXP: 999  },
-  { name: 'Green Thumb',      emoji: '🌳', icon: 'rose-outline',   minXP: 1000, maxXP: 1499 },
-  { name: 'Bloom Keeper',     emoji: '🌸', icon: 'rose',           minXP: 1500, maxXP: 2099 },
-  { name: 'Garden Sage',      emoji: '🧙', icon: 'color-wand',     minXP: 2100, maxXP: 2799 },
-  { name: 'Master Gardener',  emoji: '🏆', icon: 'trophy',         minXP: 2800, maxXP: Infinity },
+  { name: 'Seedling',         emoji: '🌱', icon: 'leaf-outline',   minXP: 0,      maxXP: 149    },
+  { name: 'Sprout',           emoji: '🌿', icon: 'leaf',           minXP: 150,    maxXP: 399    },
+  { name: 'Grower',           emoji: '🪴', icon: 'flower-outline', minXP: 400,    maxXP: 899    },
+  { name: 'Budding Gardener', emoji: '🌷', icon: 'flower',         minXP: 900,    maxXP: 1799   },
+  { name: 'Green Thumb',      emoji: '🌳', icon: 'rose-outline',   minXP: 1800,   maxXP: 3499   },
+  { name: 'Bloom Keeper',     emoji: '🌸', icon: 'rose',           minXP: 3500,   maxXP: 6999   },
+  { name: 'Garden Sage',      emoji: '🧙', icon: 'color-wand',     minXP: 7000,   maxXP: 11999  },
+  { name: 'Master Gardener',  emoji: '🏆', icon: 'trophy',         minXP: 12000,  maxXP: 19999  },
+  { name: 'Botanist',         emoji: '🎖️', icon: 'medal',          minXP: 20000,  maxXP: 29999  },
+  { name: 'Plant Legend',     emoji: '💎', icon: 'diamond',        minXP: 30000,  maxXP: 39999  },
+  { name: 'Forest Guardian',  emoji: '🛡️', icon: 'shield',         minXP: 40000,  maxXP: 59999  },
+  { name: 'Plant Whisperer',  emoji: '✨', icon: 'sparkles',       minXP: 60000,  maxXP: 79999  },
+  { name: 'Garden Immortal',  emoji: '♾️', icon: 'infinite',       minXP: 80000,  maxXP: 99999  },
+  { name: 'Eden Keeper',      emoji: '🪐', icon: 'planet',         minXP: 100000, maxXP: Infinity },
 ];
 
 export function getLevel(totalXP: number): Level {
@@ -24,6 +34,13 @@ export function getLevel(totalXP: number): Level {
     if (totalXP >= LEVELS[i].minXP) return LEVELS[i];
   }
   return LEVELS[0];
+}
+
+// The next level up, or null at max — used by the hero XP card to show
+// "520 XP to Garden Sage" instead of a generic "to next level".
+export function getNextLevel(totalXP: number): Level | null {
+  const idx = LEVELS.indexOf(getLevel(totalXP));
+  return idx >= LEVELS.length - 1 ? null : LEVELS[idx + 1];
 }
 
 export function xpToNextLevel(totalXP: number): { current: number; needed: number; pct: number } {

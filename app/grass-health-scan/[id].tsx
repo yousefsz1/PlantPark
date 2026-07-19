@@ -14,7 +14,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../../lib/supabase';
-import { incrementScanCount } from '../../lib/scanLimits';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 
@@ -121,10 +120,8 @@ export default function GrassHealthScanScreen() {
 
       const result = data as { issues: string[]; tips: string[]; health_level: number };
 
-      // Meter this against the user's tier — a Lawn Health Scan sends 3
-      // images in one call, so it counts as 3 scans. Fire and forget, same
-      // as regular single-photo scans.
-      incrementScanCount(3);
+      // Scan metering (3 scans) now happens server-side inside
+      // analyze-grass-health, which also enforces the Basic/Pro requirement.
 
       // Save all 3 photos to the lawn's photo timeline — only once analysis
       // has actually succeeded, so an abandoned/failed scan doesn't litter
@@ -163,6 +160,7 @@ export default function GrassHealthScanScreen() {
           health_tips_pro: result.tips ?? [],
           lawn_health_level: result.health_level,
           lawn_health_checked_at: new Date().toISOString(),
+          fertilizer_recommendation: (result as { fertilizer_recommendation?: string | null }).fertilizer_recommendation ?? null,
         })
         .eq('id', plantId);
       if (updateErr) throw updateErr;

@@ -14,9 +14,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
-import { getLevel, xpToNextLevel } from '../../lib/levels';
+import { getLevel, getNextLevel, xpToNextLevel } from '../../lib/levels';
 import { scheduleTaskNotification, cancelPlantNotifications } from '../../lib/notifications';
-import type { Plant, CareTaskWithPlantPhoto, Space } from '../../types/database';
+import type { Plant, CareTaskWithPlantPhoto, Space, JournalEntryType } from '../../types/database';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import PlantCard from '../../components/PlantCard';
@@ -61,18 +61,20 @@ const TASK_LABEL: Record<string, string> = {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
+// Hero XP card — the gamification centerpiece gets the strongest visual
+// weight on the screen: solid green card, white text, gold XP accents.
 function LevelBar({ totalXP }: { totalXP: number }) {
   const { Colors, FontSize } = useTheme();
   const styles = getStyles(Colors, FontSize);
   const level = getLevel(totalXP);
+  const next = getNextLevel(totalXP);
   const { pct, needed } = xpToNextLevel(totalXP);
-  const isMax = needed === 0;
 
   return (
     <View style={styles.levelBar}>
       <View style={styles.levelBarRow}>
         <View style={styles.levelNameRow}>
-          <Ionicons name={level.icon as any} size={15} color={Colors.textPrimary} />
+          <Ionicons name={level.icon as any} size={15} color="#FFFFFF" />
           <Text style={styles.levelName}>{level.name}</Text>
         </View>
         <Text style={styles.levelXP}>{totalXP.toLocaleString()} XP</Text>
@@ -81,7 +83,7 @@ function LevelBar({ totalXP }: { totalXP: number }) {
         <View style={[styles.levelProgressFill, { width: `${pct}%` }]} />
       </View>
       <Text style={styles.levelNextText}>
-        {isMax ? 'Max level reached!' : `${needed} XP to next level`}
+        {next ? `${needed} XP to ${next.name}` : 'Max level reached!'}
       </Text>
     </View>
   );
@@ -100,12 +102,19 @@ function PlantListCard({
   const styles = getStyles(Colors, FontSize);
 
   const today = todayISO();
-  const overdueCount = pendingTasks.filter(t => t.plant_id === plant.id && t.due_date < today).length;
+  const plantTasks = pendingTasks.filter(t => t.plant_id === plant.id);
+  const overdueCount = plantTasks.filter(t => t.due_date < today).length;
   const displayHealth = Math.max(0, plant.health_percent - overdueCount * 10);
+
+  // Days until the next watering — powers the "Water in N days" line.
+  const nextDue = plantTasks.length > 0 ? plantTasks[0].due_date : null;
+  const nextWaterDays = nextDue
+    ? Math.max(0, Math.round((new Date(nextDue).getTime() - new Date(today).getTime()) / 86400000))
+    : null;
 
   return (
     <TouchableOpacity style={styles.plantCardWrap} onPress={onPress} activeOpacity={0.82}>
-      <PlantCard plant={plant} displayHealth={displayHealth} />
+      <PlantCard plant={plant} displayHealth={displayHealth} nextWaterDays={nextWaterDays} />
     </TouchableOpacity>
   );
 }
@@ -243,11 +252,13 @@ export default function GardenScreen() {
     const [plantsRes, spacesRes, tasksRes, profileRes, userRes] = await Promise.all([
       supabase.from('plants').select('*').order('created_at', { ascending: true }),
       supabase.from('spaces').select('*').order('created_at', { ascending: true }),
+      // ALL pending watering tasks (not just due ones) — future due dates
+      // power the "Water in N days" line on each plant row; missions filter
+      // down to due-today-or-overdue client-side.
       supabase
         .from('care_tasks')
         .select('*, plants(id, name, photo_url)')
         .eq('task_type', 'watering')
-        .lte('due_date', today)
         .is('completed_at', null)
         .order('due_date'),
       supabase.from('profiles').select('total_xp').maybeSingle(),
@@ -307,7 +318,7 @@ export default function GardenScreen() {
       if (result && task.plants?.name) {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-          const TASK_ENTRY: Record<string, string> = {
+          const TASK_ENTRY: Record<string, JournalEntryType> = {
             watering: 'watered', fertilizing: 'fertilized', misting: 'misted',
           };
           const TASK_MSG: Record<string, string> = {
@@ -315,7 +326,7 @@ export default function GardenScreen() {
             fertilizing: `Fertilized ${task.plants.name} +${result.xp_reward} XP`,
             misting:     `Misted ${task.plants.name} +${result.xp_reward} XP`,
           };
-          const jRows: { plant_id: string; user_id: string; entry_type: string; message: string }[] = [
+          const jRows: { plant_id: string; user_id: string; entry_type: JournalEntryType; message: string }[] = [
             {
               plant_id: task.plant_id, user_id: user.id,
               entry_type: TASK_ENTRY[result.task_type] ?? 'note',
@@ -349,12 +360,18 @@ export default function GardenScreen() {
     } finally {
       setCompletingTask(null);
     }
-  }, [fetchData]);
+    // totalXP is used in the level-up comparison above — omitting it left a
+    // stale closure that could mis-detect level-ups.
+  }, [fetchData, totalXP]);
 
   const openAddPlant = useCallback(() => router.push('/add-plant'), [router]);
 
-  const visibleMissions = pendingTasks.slice(0, 6);
-  const extraMissions   = pendingTasks.length - visibleMissions.length;
+  // Missions = watering tasks due today or overdue (pendingTasks now also
+  // contains future tasks, used for the "Water in N days" row line).
+  const todayStr = todayISO();
+  const dueMissions = pendingTasks.filter(t => t.due_date <= todayStr);
+  const visibleMissions = dueMissions.slice(0, 6);
+  const extraMissions   = dueMissions.length - visibleMissions.length;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -482,7 +499,8 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   return StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.background },
   scroll: { flex: 1 },
-  content: { padding: Spacing.md, paddingBottom: Spacing.xxl },
+  // Extra bottom padding so the floating + button never covers the last row
+  content: { padding: Spacing.md, paddingBottom: 104 },
   contentCentered: { flexGrow: 1 },
 
   // Header
@@ -496,32 +514,30 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   greeting: { fontSize: FontSize.sm, color: Colors.textSecondary },
   title: { fontSize: FontSize.hero, fontWeight: '700', color: Colors.textPrimary },
 
-  // Level bar
+  // Level bar — hero card: solid green, white text, gold XP accents
   levelBar: {
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.primaryDark,
     borderRadius: Radius.lg,
     padding: Spacing.md,
     marginBottom: Spacing.lg,
-    borderWidth: 1,
-    borderColor: Colors.border,
     gap: 6,
   },
   levelBarRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   levelNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  levelName: { fontSize: FontSize.md, fontWeight: '700', color: Colors.textPrimary },
-  levelXP: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.xp },
+  levelName: { fontSize: FontSize.md, fontWeight: '700', color: '#FFFFFF' },
+  levelXP: { fontSize: FontSize.sm, fontWeight: '700', color: '#F4D03F' },
   levelProgressBg: {
     height: 8,
-    backgroundColor: Colors.surfaceElevated,
+    backgroundColor: 'rgba(255,255,255,0.25)',
     borderRadius: Radius.full,
     overflow: 'hidden',
   },
   levelProgressFill: {
     height: '100%',
-    backgroundColor: Colors.primary,
+    backgroundColor: '#F4D03F',
     borderRadius: Radius.full,
   },
-  levelNextText: { fontSize: FontSize.xs, color: Colors.textMuted },
+  levelNextText: { fontSize: FontSize.xs, color: 'rgba(255,255,255,0.8)' },
 
   // Sections
   sectionTitle: {

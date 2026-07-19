@@ -132,6 +132,22 @@ export default function GrassDetailScreen() {
   const wateringIntervalDays = pendingWateringTask?.interval_days ?? liveWatering.intervalDays;
   const watering = { intervalDays: wateringIntervalDays, liters: liveWatering.liters };
   const wateredByRain = lastCompletedWateringTask?.completed_via === 'rain';
+
+  // Condition tint for the details grid — a yellowing lawn shouldn't render
+  // in the same calm gray as a healthy one.
+  const conditionColor =
+    plant.lawn_condition === 'healthy'   ? Colors.primary :
+    plant.lawn_condition === 'yellowing' ? Colors.warning :
+    plant.lawn_condition === 'patchy'    ? Colors.serious :
+    Colors.textMuted;
+
+  // Health meter color scales with the score — previously always green,
+  // which made a 2/5 lawn look fine at a glance.
+  const lawnHealthColor =
+    (plant.lawn_health_level ?? 5) <= 1 ? Colors.danger :
+    (plant.lawn_health_level ?? 5) === 2 ? Colors.serious :
+    (plant.lawn_health_level ?? 5) === 3 ? Colors.warning :
+    Colors.primary;
   const fertilizing = getFertilizingPlan(areaM2);
   const mowing = getMowingPlan(lawnCondition);
   const fertilizingIntervalDays = plant.fertilizing_frequency_days ?? fertilizing.intervalDays;
@@ -220,43 +236,43 @@ export default function GrassDetailScreen() {
           </View>
         )}
 
-        <View style={styles.card}>
+        {/* Lawn details — 2×2 tile grid with tinted icons (matches the plant
+            page), floating glossy card over the photo's bottom edge */}
+        <View style={styles.detailsCard}>
           <Text style={styles.cardTitle}>Lawn Details</Text>
-
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Size</Text>
-            <Text style={styles.rowValue}>
-              {plant.lawn_length_m ?? '—'} m × {plant.lawn_width_m ?? '—'} m
-            </Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Area</Text>
-            <Text style={styles.rowValue}>{plant.lawn_area_m2 ?? '—'} m²</Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Sun Exposure</Text>
-            <Text style={styles.rowValue}>
-              {plant.sun_exposure ? SUN_LABELS[plant.sun_exposure] ?? plant.sun_exposure : '—'}
-            </Text>
-          </View>
-          <View style={[styles.row, styles.rowLast]}>
-            <Text style={styles.rowLabel}>Condition</Text>
-            <Text style={styles.rowValue}>
-              {plant.lawn_condition ? CONDITION_LABELS[plant.lawn_condition] ?? plant.lawn_condition : '—'}
-            </Text>
+          <View style={styles.infoGrid}>
+            {[
+              { icon: 'resize',  tint: Colors.primary, label: 'Size',         value: `${plant.lawn_length_m ?? '—'} m × ${plant.lawn_width_m ?? '—'} m` },
+              { icon: 'grid',    tint: Colors.rare,    label: 'Area',         value: `${plant.lawn_area_m2 ?? '—'} m²` },
+              { icon: 'sunny',   tint: Colors.xp,      label: 'Sun Exposure', value: plant.sun_exposure ? SUN_LABELS[plant.sun_exposure] ?? plant.sun_exposure : '—' },
+              { icon: 'pulse',   tint: conditionColor, label: 'Condition',    value: plant.lawn_condition ? CONDITION_LABELS[plant.lawn_condition] ?? plant.lawn_condition : '—', valueColor: conditionColor },
+            ].map(({ icon, tint, label, value, valueColor }) => (
+              <View key={label} style={styles.infoItem}>
+                <View style={[styles.infoIconCircle, { backgroundColor: `${tint}1F` }]}>
+                  <Ionicons name={icon as any} size={16} color={tint} />
+                </View>
+                <Text style={styles.infoLabel}>{label}</Text>
+                <Text style={[styles.infoValue, valueColor ? { color: valueColor } : null]} numberOfLines={2}>{value}</Text>
+              </View>
+            ))}
           </View>
         </View>
 
+        {/* Care plan — one compact card instead of three mostly-empty ones */}
         <View style={styles.planCard}>
-          <View style={styles.planCardHeader}>
+          <Text style={styles.cardTitle}>Care Plan</Text>
+
+          <View style={styles.carePlanRow}>
             <View style={[styles.planIconWrap, { backgroundColor: `${WATER_COLOR}26` }]}>
-              <Ionicons name="water" size={20} color={WATER_COLOR} />
+              <Ionicons name="water" size={18} color={WATER_COLOR} />
             </View>
-            <Text style={styles.planCardTitle}>Watering</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.planCardTitle}>Watering</Text>
+              <Text style={styles.planCardValue}>
+                Every {watering.intervalDays} day{watering.intervalDays === 1 ? '' : 's'} · {watering.liters} L each time
+              </Text>
+            </View>
           </View>
-          <Text style={styles.planCardValue}>
-            Every {watering.intervalDays} day{watering.intervalDays === 1 ? '' : 's'} · {watering.liters} L each time
-          </Text>
 
           {wateredByRain ? (
             <View style={styles.rainBanner}>
@@ -275,29 +291,39 @@ export default function GrassDetailScreen() {
               ) : null}
             </View>
           ) : null}
-        </View>
 
-        <View style={styles.planCard}>
-          <View style={styles.planCardHeader}>
+          <View style={styles.carePlanDivider} />
+
+          <View style={styles.carePlanRow}>
             <View style={[styles.planIconWrap, { backgroundColor: 'rgba(46,204,113,0.15)' }]}>
-              <Ionicons name="nutrition" size={20} color={Colors.primary} />
+              <Ionicons name="nutrition" size={18} color={Colors.primary} />
             </View>
-            <Text style={styles.planCardTitle}>Fertilizing</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.planCardTitle}>Fertilizing</Text>
+              <Text style={styles.planCardValue}>
+                Every {fertilizingWeeks} week{fertilizingWeeks === 1 ? '' : 's'} · {fertilizing.cups} cup{fertilizing.cups === 1 ? '' : 's'} each time
+              </Text>
+              {plant.fertilizer_recommendation ? (
+                <Text style={styles.fertilizerRecText}>
+                  <Text style={{ fontWeight: '700' }}>What to use: </Text>
+                  {plant.fertilizer_recommendation}
+                </Text>
+              ) : null}
+            </View>
           </View>
-          <Text style={styles.planCardValue}>
-            Every {fertilizingWeeks} week{fertilizingWeeks === 1 ? '' : 's'} · {fertilizing.cups} cup{fertilizing.cups === 1 ? '' : 's'} each time
-          </Text>
-        </View>
 
-        <View style={styles.planCard}>
-          <View style={styles.planCardHeader}>
+          <View style={styles.carePlanDivider} />
+
+          <View style={styles.carePlanRow}>
             <View style={[styles.planIconWrap, { backgroundColor: `${Colors.xp}26` }]}>
-              <Ionicons name="cut" size={20} color={Colors.xp} />
+              <Ionicons name="cut" size={18} color={Colors.xp} />
             </View>
-            <Text style={styles.planCardTitle}>Mowing</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.planCardTitle}>Mowing</Text>
+              <Text style={styles.planCardValue}>Weekly</Text>
+              {mowing.note ? <Text style={styles.planCardNote}>{mowing.note}</Text> : null}
+            </View>
           </View>
-          <Text style={styles.planCardValue}>Weekly</Text>
-          {mowing.note ? <Text style={styles.planCardNote}>{mowing.note}</Text> : null}
         </View>
 
         {plant.lawn_health_level == null ? (
@@ -323,17 +349,19 @@ export default function GrassDetailScreen() {
                   <Ionicons name="stats-chart" size={20} color={Colors.primary} />
                 </View>
                 <Text style={[styles.planCardTitle, { flex: 1 }]}>Lawn Health</Text>
-                <TouchableOpacity onPress={handleScanPress}>
-                  <Text style={styles.rescanLink}>Re-scan</Text>
-                </TouchableOpacity>
               </View>
-              <Text style={styles.planCardValue}>{plant.lawn_health_level}/5</Text>
-              <LevelBar level={plant.lawn_health_level} color={Colors.primary} />
+              <Text style={[styles.planCardValue, { color: lawnHealthColor, fontWeight: '700' }]}>{plant.lawn_health_level}/5</Text>
+              <LevelBar level={plant.lawn_health_level} color={lawnHealthColor} />
               {plant.lawn_health_checked_at ? (
                 <Text style={styles.lastScannedText}>
                   Last scanned {formatRelativeTime(plant.lawn_health_checked_at)}
                 </Text>
               ) : null}
+              {/* Full-width button — the old top-corner text link was too easy to miss */}
+              <TouchableOpacity style={styles.rescanBtn} onPress={handleScanPress} activeOpacity={0.8}>
+                <Ionicons name="camera-outline" size={18} color={Colors.primary} />
+                <Text style={styles.rescanBtnText}>Re-scan Lawn Health</Text>
+              </TouchableOpacity>
             </View>
 
             {plant.health_tips_pro && plant.health_tips_pro.length > 0 ? (
@@ -342,8 +370,8 @@ export default function GrassDetailScreen() {
                 <View style={styles.remediesList}>
                   {plant.health_tips_pro.map((tip, i) => (
                     <View key={i} style={styles.remedyRow}>
-                      <View style={styles.remedyBadgePro}>
-                        <Text style={styles.remedyBadgeText}>{i + 1}</Text>
+                      <View style={[styles.remedyBadgePro, { backgroundColor: `${Colors.primary}1F` }]}>
+                        <Text style={[styles.remedyBadgeText, { color: Colors.primary }]}>{i + 1}</Text>
                       </View>
                       <Text style={styles.remedyText}>{tip}</Text>
                     </View>
@@ -444,10 +472,9 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
 
     photo: {
       width: '100%',
-      height: 200,
+      height: 220,
       borderRadius: Radius.lg,
       backgroundColor: Colors.surfaceElevated,
-      marginBottom: Spacing.md,
     },
     photoPlaceholder: { justifyContent: 'center', alignItems: 'center' },
 
@@ -458,6 +485,58 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
       borderWidth: 1,
       borderColor: Colors.border,
     },
+    // Glossy floating card overlapping the hero photo — matches the plant page
+    detailsCard: {
+      marginHorizontal: Spacing.xs,
+      marginTop: -Spacing.xl,
+      backgroundColor: Colors.card,
+      borderRadius: Radius.xl,
+      padding: Spacing.lg,
+      shadowColor: '#0A3D1E',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.18,
+      shadowRadius: 20,
+      elevation: 10,
+    },
+    infoGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: Spacing.sm },
+    infoItem: {
+      width: '47%',
+      backgroundColor: Colors.surfaceElevated,
+      borderRadius: Radius.md,
+      padding: Spacing.md,
+      gap: 4,
+    },
+    infoIconCircle: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    infoLabel: {
+      fontSize: FontSize.xs,
+      color: Colors.textMuted,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+      marginTop: 4,
+    },
+    infoValue: { fontSize: FontSize.sm, color: Colors.textPrimary, fontWeight: '600' },
+    carePlanRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+    carePlanDivider: { height: 1, backgroundColor: Colors.border, marginVertical: Spacing.sm },
+    rescanBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: Spacing.sm,
+      marginTop: Spacing.md,
+      paddingVertical: Spacing.sm + 2,
+      borderRadius: Radius.full,
+      borderWidth: 1.5,
+      borderColor: Colors.primary,
+      backgroundColor: 'rgba(46,204,113,0.08)',
+    },
+    rescanBtnText: { fontSize: FontSize.md, fontWeight: '700', color: Colors.primary },
+    fertilizerRecText: { fontSize: FontSize.xs, color: Colors.primary, marginTop: 4, lineHeight: 17 },
     cardTitle: { fontSize: FontSize.md, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
     row: {
       flexDirection: 'row',

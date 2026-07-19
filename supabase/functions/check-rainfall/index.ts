@@ -8,6 +8,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const RAIN_THRESHOLD_MM = 5;
 const MAX_LOOKBACK_DAYS = 14;
+// Any forecast day at/above this within the next 3 days counts as a heatwave
+// and pulls upcoming outdoor waterings one day earlier (once per task).
+const HEAT_THRESHOLD_C = 32;
 
 type Candidate = {
   task_id: string;
@@ -18,6 +21,41 @@ type Candidate = {
   latitude: number;
   longitude: number;
 };
+
+type HeatCandidate = {
+  task_id: string;
+  plant_id: string;
+  user_id: string;
+  plant_name: string;
+  due_date: string;
+  latitude: number;
+  longitude: number;
+};
+
+// Best-effort push, mirroring sendRainWateredPush.
+async function sendHeatwavePush(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  plantName: string,
+): Promise<void> {
+  try {
+    const { data: profile } = await supabase.from('profiles').select('push_token').eq('id', userId).maybeSingle();
+    const pushToken = profile?.push_token;
+    if (!pushToken) return;
+
+    await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: pushToken,
+        title: 'Heatwave ahead 🌡️',
+        body: `Hot days are coming — ${plantName}'s watering was moved a day earlier.`,
+      }),
+    });
+  } catch {
+    // Non-fatal.
+  }
+}
 
 // Best-effort — looks up the user's push token and the plant's name, then
 // POSTs to Expo's push API. Never throws: a missing token, a lookup
@@ -127,7 +165,54 @@ serve(async (req: Request) => {
       }
     }
 
-    return new Response(JSON.stringify({ processed: rows.length, completed }), {
+    // ── Heatwave check: pull upcoming outdoor waterings 1 day earlier when
+    //    the 3-day forecast crosses the heat threshold (Basic/Pro only,
+    //    enforced inside the RPC). Runs after rain processing; failures here
+    //    never break the rain results above.
+    let heatAdjusted = 0;
+    try {
+      const { data: heatCandidates } = await supabase.rpc('get_heat_check_candidates');
+      const heatRows = (heatCandidates ?? []) as HeatCandidate[];
+
+      const heatByLocation = new Map<string, HeatCandidate[]>();
+      for (const c of heatRows) {
+        const key = `${c.latitude.toFixed(2)},${c.longitude.toFixed(2)}`;
+        const group = heatByLocation.get(key);
+        if (group) group.push(c);
+        else heatByLocation.set(key, [c]);
+      }
+
+      for (const [key, group] of heatByLocation) {
+        const [lat, lon] = key.split(',');
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max&forecast_days=3&timezone=auto`;
+        const res = await fetch(url);
+        if (!res.ok) continue;
+
+        const forecast = await res.json();
+        const maxTemps: number[] = forecast.daily?.temperature_2m_max ?? [];
+        const isHeatwave = maxTemps.some((t) => typeof t === 'number' && t >= HEAT_THRESHOLD_C);
+        if (!isHeatwave) continue;
+
+        for (const c of group) {
+          const newDue = new Date(c.due_date);
+          newDue.setDate(newDue.getDate() - 1);
+          const newDueStr = newDue.toISOString().slice(0, 10);
+
+          const { error: updErr } = await supabase
+            .from('care_tasks')
+            .update({ due_date: newDueStr, heat_adjusted_at: new Date().toISOString() })
+            .eq('id', c.task_id);
+          if (!updErr) {
+            heatAdjusted++;
+            await sendHeatwavePush(supabase, c.user_id, c.plant_name);
+          }
+        }
+      }
+    } catch {
+      // Non-fatal — heat check is best-effort.
+    }
+
+    return new Response(JSON.stringify({ processed: rows.length, completed, heat_adjusted: heatAdjusted }), {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (err) {

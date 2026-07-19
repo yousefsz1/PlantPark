@@ -28,16 +28,37 @@ serve(async (req: Request) => {
     const userId = userData.user.id;
 
     // 1. Delete all files under this user's storage folder (plant-images/<userId>/...).
-    const { data: files, error: listErr } = await adminClient.storage
-      .from('plant-images')
-      .list(userId, { limit: 1000 });
-    if (listErr) throw new Error(`Failed to list storage files: ${listErr.message}`);
+    //    Recursive + paginated: lawn progress photos live in nested folders
+    //    (<userId>/progress/<plantId>/...) which a single flat .list() never
+    //    saw, and a single call caps at its limit — both would silently leave
+    //    orphaned photos behind after account deletion (GDPR risk).
+    const PAGE = 1000;
+    const deleteFolder = async (prefix: string): Promise<void> => {
+      for (;;) {
+        const { data: entries, error: listErr } = await adminClient.storage
+          .from('plant-images')
+          .list(prefix, { limit: PAGE });
+        if (listErr) throw new Error(`Failed to list storage files: ${listErr.message}`);
+        if (!entries || entries.length === 0) break;
 
-    if (files && files.length > 0) {
-      const paths = files.map((f) => `${userId}/${f.name}`);
-      const { error: removeErr } = await adminClient.storage.from('plant-images').remove(paths);
-      if (removeErr) throw new Error(`Failed to delete storage files: ${removeErr.message}`);
-    }
+        // Folders come back with id === null; recurse into them first.
+        const folders = entries.filter((e) => e.id === null);
+        const files = entries.filter((e) => e.id !== null);
+
+        for (const folder of folders) {
+          await deleteFolder(`${prefix}/${folder.name}`);
+        }
+
+        if (files.length > 0) {
+          const paths = files.map((f) => `${prefix}/${f.name}`);
+          const { error: removeErr } = await adminClient.storage.from('plant-images').remove(paths);
+          if (removeErr) throw new Error(`Failed to delete storage files: ${removeErr.message}`);
+        }
+
+        if (entries.length < PAGE) break;
+      }
+    };
+    await deleteFolder(userId);
 
     // 2. Delete the user from Auth — cascades to plants, care_tasks,
     // journal_entries, favourites, profiles, and plant_photos via ON DELETE CASCADE.

@@ -1,4 +1,5 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { checkScanAllowance, recordScans } from '../_shared/scanGuard.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -13,7 +14,8 @@ const SYSTEM_PROMPT = `You are an expert lawn care specialist analyzing 3 photos
 {
   "issues": [<string> — 1-4 short, specific visible problems, e.g. "Patchy bare spot near the fence", "Yellowing in the shaded corner". Empty array [] if the lawn looks uniformly healthy.>],
   "tips": [<string> — exactly 3-5 actionable, specific tips based on what you actually see across all 3 photos, max 100 chars each, e.g. "Overseed the bare patch this month", "Reduce mowing height slightly to reduce stress">],
-  "healthLevel": <integer 1-5 — overall lawn health: 1 = severe issues (large dead/bare areas, widespread problems), 2 = significant issues, 3 = moderate/mixed condition, 4 = mostly healthy with minor issues, 5 = excellent, uniformly healthy>
+  "healthLevel": <integer 1-5 — overall lawn health: 1 = severe issues (large dead/bare areas, widespread problems), 2 = significant issues, 3 = moderate/mixed condition, 4 = mostly healthy with minor issues, 5 = excellent, uniformly healthy>,
+  "fertilizerRecommendation": <string — ONE specific fertilizer recommendation for THIS lawn's visible condition, max 110 chars, beginner-friendly with an N-P-K example, e.g. "Slow-release high-nitrogen lawn feed (around 20-5-10 NPK) once it's watered regularly". Include a caution instead if fertilizing now would harm the lawn (e.g. severe drought stress).>
 }
 
 Rules:
@@ -21,6 +23,7 @@ Rules:
 - issues must be empty [] only when healthLevel is 4 or 5 and nothing notable stands out.
 - tips must always have exactly 3-5 entries, tailored to what's actually visible in these specific photos — not generic filler advice.
 - healthLevel must be consistent with issues: an empty issues list should not pair with healthLevel 1 or 2.
+- fertilizerRecommendation must match the visible condition: drought-stressed or dormant lawns should be told to water first / wait, not to fertilize immediately.
 - Return ONLY JSON.`;
 
 async function fetchGeminiWithRetry(url: string, body: string, maxRetries = 2): Promise<Response> {
@@ -43,6 +46,11 @@ serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: CORS });
   }
+
+  // Lawn Health Scan sends 3 images in one Gemini call → counts as 3 scans,
+  // and the feature itself is Basic/Pro only — both enforced server-side now.
+  const guard = await checkScanAllowance(req, 3, CORS, { requirePaidTier: true });
+  if (!guard.ok) return guard.response;
 
   try {
     const apiKey = Deno.env.get('GEMINI_API_KEY');
@@ -96,9 +104,14 @@ serve(async (req: Request) => {
     const jsonStr = raw.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim();
     const parsed = JSON.parse(jsonStr);
 
-    // Expose under the snake_case name the client/DB expects.
+    // Meter the 3 scans server-side (replaces the client-side increment).
+    await recordScans(guard.admin, guard.userId, 3);
+
+    // Expose under the snake_case names the client/DB expects.
     parsed.health_level = parsed.healthLevel;
     delete parsed.healthLevel;
+    parsed.fertilizer_recommendation = parsed.fertilizerRecommendation ?? null;
+    delete parsed.fertilizerRecommendation;
 
     return new Response(JSON.stringify(parsed), {
       headers: { ...CORS, 'Content-Type': 'application/json' },

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -194,6 +194,15 @@ export default function FavouritesScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const [assigningFavourite, setAssigningFavourite] = useState<Favourite | null>(null);
+  const listRef = useRef<FlatList<Favourite>>(null);
+
+  // FlatList doesn't reset its scroll offset when `data` changes — switching
+  // to a shorter filtered list (e.g. a 1-item folder) after having scrolled
+  // under "All" leaves it holding a stale offset against much shorter
+  // content, rendering as blank space above the visible cards.
+  useEffect(() => {
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [selectedFolder]);
 
   const fetchData = useCallback(async () => {
     setError(null);
@@ -360,6 +369,7 @@ export default function FavouritesScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          style={styles.chipScrollOuter}
           contentContainerStyle={styles.chipRow}
         >
           <FolderChip label="All" active={selectedFolder === 'all'} onPress={() => setSelectedFolder('all')} />
@@ -401,10 +411,12 @@ export default function FavouritesScreen() {
         </View>
       ) : (
         <FlatList
+          ref={listRef}
           data={filteredFavourites}
           keyExtractor={item => item.id}
           numColumns={2}
           columnWrapperStyle={styles.row}
+          contentInsetAdjustmentBehavior="never"
           contentContainerStyle={[
             styles.content,
             filteredFavourites.length === 0 && styles.contentCentered,
@@ -445,6 +457,15 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
   safe: { flex: 1, backgroundColor: Colors.background },
   header: { paddingHorizontal: Spacing.md, paddingTop: Spacing.sm, paddingBottom: Spacing.md },
   title: { fontSize: FontSize.hero, fontWeight: '700', color: Colors.textPrimary },
+
+  // React Native's ScrollView bakes flexGrow: 1 into every horizontal
+  // ScrollView's outer style by default (ScrollView.js baseHorizontal),
+  // merged underneath whatever style you pass — so without this override,
+  // the chip row silently competes for flex space with the grid below it
+  // and gets stretched to fill leftover space whenever the grid is short,
+  // vertically centering the pills inside the oversized box (chipRow's own
+  // alignItems: 'center'). This forces it back to hugging its content.
+  chipScrollOuter: { flexGrow: 0, flexShrink: 0 },
 
   // paddingTop lives here (not conditionally) so the grid and the empty
   // state both start at the same offset below the chip row — previously

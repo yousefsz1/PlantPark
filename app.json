@@ -6,7 +6,7 @@
     "scheme": "plantpark",
     "orientation": "portrait",
     "icon": "./assets/icon-square.png",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.plantpark.app",
@@ -61,8 +61,8 @@
         "expo-splash-screen",
         {
           "backgroundColor": "#FAF6EC",
-          "image": "./assets/icon-square.png",
-          "imageWidth": 84,
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 110,
           "resizeMode": "contain"
         }
       ],

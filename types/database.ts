@@ -50,6 +50,7 @@ export type Database = {
           grass_health_issues: string[] | null;
           lawn_health_level: number | null;
           lawn_health_checked_at: string | null;
+          fertilizer_recommendation: string | null;
         };
         Insert: {
           id?: string;
@@ -99,6 +100,7 @@ export type Database = {
           grass_health_issues?: string[] | null;
           lawn_health_level?: number | null;
           lawn_health_checked_at?: string | null;
+          fertilizer_recommendation?: string | null;
         };
         Update: {
           id?: string;
@@ -148,6 +150,7 @@ export type Database = {
           grass_health_issues?: string[] | null;
           lawn_health_level?: number | null;
           lawn_health_checked_at?: string | null;
+          fertilizer_recommendation?: string | null;
         };
         Relationships: [
           {
@@ -408,6 +411,7 @@ export type Database = {
           location_updated_at: string | null;
           smart_watering_enabled: boolean;
           push_token: string | null;
+          avatar_url: string | null;
         };
         Insert: {
           id: string;
@@ -461,8 +465,10 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: {
-      increment_xp: {
-        Args: { xp_amount: number };
+      // Replaced increment_xp(xp_amount) — the server now decides amounts
+      // per action so clients can't award themselves arbitrary XP.
+      award_xp: {
+        Args: { p_action: string };
         Returns: number;
       };
       complete_care_task: {
@@ -473,15 +479,30 @@ export type Database = {
         Args: Record<string, never>;
         Returns: unknown;
       };
-      increment_scan_count: {
-        Args: { p_amount?: number };
-        Returns: number;
+      // Top 20 by XP + caller's own rank — names and XP only, never emails.
+      get_leaderboard: {
+        Args: Record<string, never>;
+        Returns: unknown;
+      };
+      // Replaces the direct profiles.push_token update (direct client writes
+      // to profiles were removed for security).
+      set_push_token: {
+        Args: { p_token: string };
+        Returns: undefined;
+      };
+      set_avatar_url: {
+        Args: { p_url: string };
+        Returns: undefined;
       };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };
 };
+
+// Literal union for journal entry types — screens previously typed their
+// insert rows as plain `string`, which no longer typechecks.
+export type JournalEntryType = Database['public']['Tables']['journal_entries']['Row']['entry_type'];
 
 export type Plant = Database['public']['Tables']['plants']['Row'];
 export type CareTask = Database['public']['Tables']['care_tasks']['Row'];

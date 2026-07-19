@@ -7,14 +7,17 @@ import Purchases, { type PurchasesPackage, type CustomerInfo } from 'react-nativ
 import { getScanStatus, TIER_LIMITS, type MembershipTier } from '../lib/scanLimits';
 import { Spacing, Radius, type ColorPalette, type FontSizeScale } from '../constants/theme';
 import { useTheme } from '../contexts/ThemeContext';
-import { supabase } from '../lib/supabase';
 
 type TierInfo = {
   id: MembershipTier;
   name: string;
+  // Fallback only — the UI prefers live, localized store prices from the
+  // loaded RevenueCat packages (hardcoded prices go stale and don't match
+  // regional store pricing, which is an App Store review risk).
   price: string;
   tagline: string;
   benefits: string[];
+  popular?: boolean;
 };
 
 const TIERS: TierInfo[] = [
@@ -38,7 +41,7 @@ const TIERS: TierInfo[] = [
       'Everything in Free',
       '10x more scans than Free',
       'Lawn & Grass Care Planning (AI health scans + care plans)',
-      'Smart Watering (rain-aware auto-watering)',
+      'Smart Care: rain-aware watering, seasonal schedules & heatwave alerts',
       'Priority customer support',
     ],
   },
@@ -46,6 +49,7 @@ const TIERS: TierInfo[] = [
     id: 'pro',
     name: 'Pro',
     price: '$4.99/month or $34.99/year',
+    popular: true,
     tagline: `${TIER_LIMITS.pro} scans/month (effectively unlimited)`,
     benefits: [
       'Everything in Basic',
@@ -59,18 +63,29 @@ function packageKey(tier: 'basic' | 'pro', period: 'monthly' | 'yearly') {
   return `${tier}_${period}`;
 }
 
-async function syncMembershipTier(customerInfo: CustomerInfo): Promise<MembershipTier> {
+// Live, localized store prices from the loaded packages; falls back to the
+// static string only while offerings haven't loaded.
+function priceLine(
+  tier: TierInfo,
+  packages: Record<string, PurchasesPackage>,
+): string {
+  if (tier.id === 'free') return 'Free';
+  const m = packages[packageKey(tier.id as 'basic' | 'pro', 'monthly')];
+  const y = packages[packageKey(tier.id as 'basic' | 'pro', 'yearly')];
+  if (m && y) return `${m.product.priceString}/month or ${y.product.priceString}/year`;
+  if (m) return `${m.product.priceString}/month`;
+  return tier.price;
+}
+
+// Reads the tier from RevenueCat entitlements for immediate UI feedback.
+// The database is updated by the revenuecat-webhook edge function (server-
+// side, service role) — the old client-side profiles write was removed
+// because the RLS policy enabling it also let users set 'pro' for free.
+function tierFromCustomerInfo(customerInfo: CustomerInfo): MembershipTier {
   const active = customerInfo.entitlements.active;
-  let tier: MembershipTier = 'free';
-  if (active['pro_access']) tier = 'pro';
-  else if (active['basic_access']) tier = 'basic';
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (user) {
-    await supabase.from('profiles').update({ membership_tier: tier }).eq('id', user.id);
-  }
-
-  return tier;
+  if (active['pro_access']) return 'pro';
+  if (active['basic_access']) return 'basic';
+  return 'free';
 }
 
 export default function MembershipScreen() {
@@ -126,7 +141,7 @@ export default function MembershipScreen() {
     setPurchasingKey(key);
     try {
       const { customerInfo } = await Purchases.purchasePackage(pkg);
-      const newTier = await syncMembershipTier(customerInfo);
+      const newTier = tierFromCustomerInfo(customerInfo);
       setCurrentTier(newTier);
       Alert.alert('Success', `You're now on the ${tier === 'pro' ? 'Pro' : 'Basic'} plan!`);
     } catch (err: any) {
@@ -184,11 +199,17 @@ export default function MembershipScreen() {
                 purchasingKey === packageKey(tier.id as 'basic' | 'pro', 'yearly'));
 
             return (
-              <View key={tier.id} style={[styles.card, isCurrent && styles.cardCurrent]}>
+              <View key={tier.id} style={[styles.card, isCurrent && styles.cardCurrent, tier.popular && !isCurrent && styles.cardPopular]}>
+                {tier.popular && (
+                  <View style={styles.popularBadge}>
+                    <Ionicons name="star" size={11} color={Colors.background} />
+                    <Text style={styles.popularBadgeText}>Most Popular</Text>
+                  </View>
+                )}
                 <View style={styles.cardHeader}>
                   <View style={styles.cardHeaderText}>
                     <Text style={styles.tierName}>{tier.name}</Text>
-                    <Text style={styles.tierPrice}>{tier.price}</Text>
+                    <Text style={styles.tierPrice}>{priceLine(tier, packages)}</Text>
                   </View>
                   {isCurrent && (
                     <View style={styles.currentBadge}>
@@ -276,6 +297,22 @@ function getStyles(Colors: ColorPalette, FontSize: FontSizeScale) {
       borderColor: Colors.primary,
       backgroundColor: 'rgba(46,204,113,0.08)',
     },
+    cardPopular: {
+      borderWidth: 1.5,
+      borderColor: Colors.xp,
+    },
+    popularBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      alignSelf: 'flex-start',
+      backgroundColor: Colors.xp,
+      paddingHorizontal: Spacing.sm,
+      paddingVertical: 3,
+      borderRadius: Radius.full,
+      marginBottom: 2,
+    },
+    popularBadgeText: { fontSize: FontSize.xs, fontWeight: '700', color: Colors.background },
 
     cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
     cardHeaderText: { flex: 1, gap: 2 },
